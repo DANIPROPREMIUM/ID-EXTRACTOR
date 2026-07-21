@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ID EXTRACTOR",
-  "version": "1.0",
+  "version": "2.0",
   "description": "Extrae IDs automáticamente del acortador shortxlinks",
   "permissions": [
     "tabs",

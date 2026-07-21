@@ -65,6 +65,20 @@ async function crearPestañaSilenciosa(url) {
   }
 }
 
+// 🟢 NUEVA FUNCIÓN: En lugar de cerrar, resalta la pestaña
+async function resaltarPestañaProceso() {
+  if (pestañaProceso) {
+    try {
+      // Activar y poner en primer plano la pestaña para que el usuario la vea
+      await chrome.tabs.update(pestañaProceso, { active: true });
+      console.log("✅ Pestaña resaltada (no cerrada)");
+    } catch(e) {
+      console.log("⚠️ No se pudo resaltar la pestaña:", e);
+    }
+  }
+}
+
+// Esta función ya no se usa para cerrar, pero la mantengo por si acaso
 async function cerrarPestañaProceso() {
   if (pestañaProceso) {
     try {
@@ -237,9 +251,10 @@ async function procesarEnlaceAcortado(shortLink, esAndroid = false) {
         pasteUrl: urlFinal
       }).catch(() => {});
       
-      // Cerrar pestaña
-      setTimeout(() => {
-        cerrarPestañaProceso();
+      // 🟢 CAMBIO IMPORTANTE: En lugar de cerrar la pestaña, la resaltamos
+      // para que el usuario vea el resultado
+      setTimeout(async () => {
+        await resaltarPestañaProceso();
         delete procesosActivos[tabId];
       }, 3000);
       
@@ -263,8 +278,9 @@ async function procesarEnlaceAcortado(shortLink, esAndroid = false) {
       error: error.message 
     }).catch(() => {});
     
-    setTimeout(() => {
-      cerrarPestañaProceso();
+    // 🟢 También en caso de error, resaltamos la pestaña para que el usuario vea dónde falló
+    setTimeout(async () => {
+      await resaltarPestañaProceso();
     }, 1000);
     
     delete procesosActivos[tabId];
