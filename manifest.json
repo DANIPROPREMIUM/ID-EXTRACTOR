@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "ID EXTRACTOR",
-  "version": "2.0",
-  "description": "Extrae IDs automáticamente del acortador shortxlinks",
+  "version": "3.0",
+  "description": "Pasa automáticamente los anuncios de shortlinks y extrae el ID del paste.myst.rs",
   "permissions": [
     "tabs",
     "scripting",
     "storage",
+    "webNavigation",
     "clipboardWrite"
   ],
   "host_permissions": ["*://*/*"],
@@ -20,7 +21,7 @@
     }
   },
   "icons": {
-    "16": "icons/icon16.png",   
+    "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
