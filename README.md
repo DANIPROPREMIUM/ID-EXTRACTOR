@@ -3,7 +3,7 @@
 <!-- ======================================= -->
 
 <!-- Título Principal -->
-<h1 align="center">ID EXTRACTOR v2.0</h1>
+<h1 align="center">ID EXTRACTOR v3.0</h1>
 
 <!-- Imagen Principal (Screenshot o Logo) -->
 <p align="center">
