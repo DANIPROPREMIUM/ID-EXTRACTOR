@@ -1,8 +1,12 @@
 // BACKGROUND SERVICE WORKER - pasa anuncios y extrae ID de paste.myst.rs
 
+// Estos dominios los rota el acortador cada poco (se han visto nclsil.in,
+// livetechnewz.com, indiapharmajobs.in, questain.com, whatsstatusvideo.com…).
+// Son sólo el punto de partida: esShortlinkConocido reconoce el patrón "mtc1."
+// para que un cambio de dominio no vuelva a romper nada.
 let dominiosConocidos = {
-  primeraRonda: 'mtc1.nclsil.in',
-  segundaRonda: 'mtc1.livetechnewz.com',
+  primeraRonda: 'mtc1.indiapharmajobs.in',
+  segundaRonda: 'mtc1.whatsstatusvideo.com',
   shortlinks: 'shortxlinks.in'
 };
 
@@ -10,7 +14,7 @@ const DOMINIOS_BASE = ['softurl.in', 'shortxlinks.in', 'shortxlinks.com'];
 const PASTE_DOMINIO = 'paste.myst.rs';
 
 // ===== Páginas "gate" (blogspot y similares) =====
-const PISTAS_DESTINO = /(shortxlinks|softurl|nclsil|livetechnewz|safelink|shrinkme|shrinklink|gplinks|droplink|exe\.io|ouo\.io|adf\.ly|clk\.sh|linkvertise|mediafire\.com|mega\.nz|drive\.google\.com|docs\.google\.com|pixeldrain\.(com|net)|workupload\.com|1fichier\.com|gofile\.io|sfl\.gl|terabox\.com)/i;
+const PISTAS_DESTINO = /(shortxlinks|softurl|nclsil|livetechnewz|indiapharmajobs|whatsstatusvideo|questain|safelink|shrinkme|shrinklink|gplinks|droplink|exe\.io|ouo\.io|adf\.ly|clk\.sh|linkvertise|mediafire\.com|mega\.nz|drive\.google\.com|docs\.google\.com|pixeldrain\.(com|net)|workupload\.com|1fichier\.com|gofile\.io|sfl\.gl|terabox\.com)/i;
 const DOMINIOS_ANUNCIO = /(temu\.|aliexpress|gamsgo|monetag|spinnyspinwheel|t\.co\/|shopee|amazon\.|bit\.ly|adsterra|propellerads|hilltopads|doubleclick|googlesyndication|googletagmanager|google-analytics|facebook\.|twitter\.|blogger\.com|blogspot\.com|gstatic|googleapis|schema\.org|w3\.org|youtube\.|telegram\.|t\.me)/i;
 const HOSTS_ARCHIVO = /(mediafire\.com|mega\.nz|drive\.google\.com|docs\.google\.com|pixeldrain\.(com|net)|workupload\.com|1fichier\.com|gofile\.io|terabox\.com|dropbox\.com|sourceforge\.net|androidfilehost\.com|akirabox\.com|krakenfiles\.com|buzzheavier\.com|send\.cm|qiwi\.gg|datanodes\.to)/i;
 const CLAVES_DESTINO = /(mediafire|final|download|descarga|apk|mega|drive|destino|target|real|unlock|link_?url|url_?link)/i;
@@ -47,23 +51,9 @@ function inyeccionTemprana() {
     });
   } catch (e) {}
 
-  const FACTOR = 3;
-  const _setInterval = window.setInterval;
-  const _setTimeout = window.setTimeout;
-
-  window.setInterval = function(fn, delay, ...args) {
-    if (typeof delay === 'number' && delay >= 700) {
-      delay = Math.max(50, Math.round(delay / FACTOR));
-    }
-    return _setInterval(fn, delay, ...args);
-  };
-
-  window.setTimeout = function(fn, delay, ...args) {
-    if (typeof delay === 'number' && delay >= 700) {
-      delay = Math.max(50, Math.round(delay / FACTOR));
-    }
-    return _setTimeout(fn, delay, ...args);
-  };
+  // Los timers van a velocidad normal a propósito. Antes se dividían entre 3 y
+  // la cuenta atrás terminaba antes de lo que el acortador comprueba en su
+  // servidor: contestaba "Too Early" y la extracción se quedaba colgada.
 
   const ventanaFalsa = {
     closed: false,
@@ -102,6 +92,57 @@ chrome.webNavigation.onCommitted.addListener((details) => {
     injectImmediately: true,
     func: inyeccionTemprana
   }).catch(() => {});
+});
+
+// ---------- URL rota del acortador ----------
+//
+// shortxlinks responde a la redirección con la cabecera Location mal formada,
+// con el esquema repetido:
+//
+//   location: https://https://mtc1.questain.com/?adlinkfly=CODIGO?token
+//
+// Chrome se lo cree, se va a buscar un host llamado "https" y planta su página
+// de error ("no se pudo cargar"). La pestaña se muere ahí, antes de que exista
+// ningún botón que pulsar. Se limpia el esquema de más y se manda la pestaña a
+// la URL buena; de ahí en adelante todo sigue igual que siempre.
+
+function normalizarUrl(u) {
+  let v = String(u || '').trim();
+  // Hay que contemplar las dos formas:
+  //   - la cabecera tal cual:            https://https://mtc1.x.com/?...
+  //   - lo que deja Chrome al parsearla: https://https//mtc1.x.com/?...
+  //     (toma "https" como host, los dos puntos como puerto vacío y se los come)
+  for (let i = 0; i < 5; i++) {
+    const m = v.match(/^(https?):\/\/https?:?\/\/?(.+)$/i);
+    if (!m) break;
+    v = m[1] + '://' + m[2];
+  }
+  return v;
+}
+
+async function obtenerUrlPestaña(tabId) {
+  try { const t = await chrome.tabs.get(tabId); return t.url || ''; } catch (e) { return ''; }
+}
+
+/** Si la pestaña quedó parada en una URL con el esquema repetido, la corrige. */
+async function repararUrlRota(tabId) {
+  const url = await obtenerUrlPestaña(tabId);
+  const limpia = normalizarUrl(url);
+  if (limpia === url || !/^https?:\/\//i.test(limpia)) return false;
+  console.log(`🩹 URL rota del acortador, se corrige: ${limpia}`);
+  try { await chrome.tabs.update(tabId, { url: normalizarUrl(limpia) }); } catch (e) {}
+  await delay(3000);
+  return true;
+}
+
+// Cuando la navegación falla (el host "https" no resuelve) se reintenta limpia
+// en el acto, sin esperar a la siguiente vuelta del bucle.
+chrome.webNavigation.onErrorOccurred.addListener((detalles) => {
+  if (detalles.tabId !== pestañaProceso || detalles.frameId !== 0) return;
+  const limpia = normalizarUrl(detalles.url);
+  if (limpia === detalles.url) return;
+  console.log(`🩹 navegación fallida, se reintenta limpia: ${limpia}`);
+  chrome.tabs.update(detalles.tabId, { url: limpia }).catch(() => {});
 });
 
 // ---------- Gestión de dominios ----------
@@ -153,7 +194,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // ---------- Helpers ----------
 async function crearPestañaSilenciosa(url) {
   try {
-    const tab = await chrome.tabs.create({ url: url, active: false, index: 999 });
+    const tab = await chrome.tabs.create({ url: normalizarUrl(url), active: false, index: 999 });
     pestañaProceso = tab.id;
     try { await chrome.tabs.update(tab.id, { muted: true }); } catch(e) {}
     console.log("✅ Pestaña silenciosa creada");
@@ -177,6 +218,9 @@ function obtenerHost(url) {
 
 function esShortlinkConocido(host) {
   if (!host) return false;
+  // Las rondas de anuncios del acortador siempre salen bajo "mtc1.<loquesea>",
+  // aunque el dominio cambie de un día para otro.
+  if (/^mtc\d*\./i.test(host)) return true;
   const lista = [
     dominiosConocidos.primeraRonda,
     dominiosConocidos.segundaRonda,
@@ -405,11 +449,10 @@ async function procesarPaginaGate(tabId) {
   const escondido = await extraerEnlaceFinalEscondido(tabId);
   if (escondido) {
     console.log(`⚡ gate: enlace final ya presente, se navega directo a ${escondido}`);
-    try { await chrome.tabs.update(tabId, { url: escondido }); } catch (e) {}
+    try { await chrome.tabs.update(tabId, { url: normalizarUrl(escondido) }); } catch (e) {}
     await delay(3000);
     return true;
   }
-  await prepararGate(tabId);
   await delay(500);
   const pasos = await ejecutarEnPagina(tabId, () => {
     return document.querySelectorAll(
@@ -436,7 +479,7 @@ async function procesarPaginaGate(tabId) {
       const urlActual = await obtenerUrlActual(tabId);
       const destino = new URL(url, urlActual).href;
       console.log(`✅ gate: destino capturado ${destino}`);
-      await chrome.tabs.update(tabId, { url: destino });
+      await chrome.tabs.update(tabId, { url: normalizarUrl(destino) });
       await delay(3000);
       return true;
     } catch (e) {}
@@ -470,65 +513,13 @@ function extraerEnlaceFinalEscondido(tabId) {
   }, null);
 }
 
-async function prepararGate(tabId) {
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      world: 'MAIN',
-      func: () => {
-        if (window.__paGateListo) return true;
-        window.__paGateListo = true;
-        const FACTOR = 30;
-        const CLAVE_TIEMPO = /TIME|SECOND|SEGUND|DELAY|WAIT|ESPERA|COUNT|TIMER|DURATION/i;
-        const aplanarTiempos = (obj) => {
-          try {
-            let tocaAlgo = false;
-            for (const k of Object.keys(obj)) {
-              if (CLAVE_TIEMPO.test(k) && typeof obj[k] === 'number') tocaAlgo = true;
-            }
-            if (!tocaAlgo) return false;
-            for (const k of Object.keys(obj)) {
-              if (CLAVE_TIEMPO.test(k) && typeof obj[k] === 'number' && obj[k] > 0 && obj[k] <= 600) {
-                obj[k] = 0;
-              }
-            }
-            return true;
-          } catch (e) { return false; }
-        };
-        try { if (typeof CONFIG === 'object' && CONFIG) aplanarTiempos(CONFIG); } catch (e) {}
-        try {
-          for (const k of Object.getOwnPropertyNames(window)) {
-            let v;
-            try { v = window[k]; } catch (e) { continue; }
-            if (v && typeof v === 'object' && !Array.isArray(v) && v !== window) {
-              try { if (Object.keys(v).length < 40) aplanarTiempos(v); } catch (e) {}
-            }
-          }
-        } catch (e) {}
-        try {
-          const OrigDate = Date;
-          const _now = OrigDate.now.bind(OrigDate);
-          const T0 = _now();
-          const warp = () => T0 + (_now() - T0) * FACTOR;
-          OrigDate.now = warp;
-          const DateProxy = new Proxy(OrigDate, {
-            construct(target, args) {
-              return args.length === 0 ? new target(warp()) : new target(...args);
-            },
-            apply() { return new OrigDate(warp()).toString(); }
-          });
-          window.Date = DateProxy;
-        } catch (e) {}
-        try {
-          const _pnow = performance.now.bind(performance);
-          const P0 = _pnow();
-          performance.now = () => P0 + (_pnow() - P0) * FACTOR;
-        } catch (e) {}
-        return true;
-      }
-    });
-  } catch (e) {}
-}
+// prepararGate ya no existe a propósito.
+//
+// Lo que hacía era falsear el tiempo dentro de la página: multiplicaba
+// Date.now() y performance.now() por 30 y ponía a cero cualquier variable que
+// oliera a temporizador. Con eso la cuenta atrás se saltaba, pero el servidor
+// del acortador compara sus propios tiempos y contestaba "Too Early".
+// Ahora las páginas van a su ritmo real y se pulsan los botones cuando toca.
 
 async function esperarFinDePaso(tabId, timeout = 30000) {
   const inicio = Date.now();
@@ -616,7 +607,7 @@ async function procesarRondaWpSafelink(tabId) {
     const oculto = await extraerDestinoWpSafelink(tabId);
     if (oculto) {
       console.log(`↪ wpsafelink: botón oculto, se navega directo a ${oculto}`);
-      try { await chrome.tabs.update(tabId, { url: oculto }); } catch (e) {}
+      try { await chrome.tabs.update(tabId, { url: normalizarUrl(oculto) }); } catch (e) {}
       await delay(3000);
       return;
     }
@@ -642,18 +633,26 @@ function extraerDestinoWpSafelink(tabId) {
 
 async function procesarPaginaAdlinkfly(tabId) {
   await intentarClicVerificacionHumana(tabId);
-  await delay(1000);
-  for (let i = 0; i < 6; i++) {
-    const estado = await desbloquearContadorAdlinkfly(tabId);
-    if (estado === 'enviado' || estado === 'sin-formulario') break;
-    await delay(1000);
-  }
-  const href = await esperarHrefGetLink(tabId, 30000);
+
+  // El formulario NO se envía a mano, a propósito.
+  //
+  // La página se manda sola: cuando su contador llega a cero hace
+  //   $("#go-link").addClass("go-link").submit()
+  // y ese submit lo recoge un manejador declarado con .one(), o sea que sólo
+  // funciona UNA vez. Hace preventDefault() y manda el POST por AJAX; al volver
+  // le pone el enlace bueno al botón "a.get-link", sin navegar.
+  //
+  // Si aquí forzábamos otro submit, el manejador ya estaba gastado: no había
+  // preventDefault(), el navegador mandaba el POST a pelo y acababa en
+  // /links/go con {"estado":"error","mensaje":"Solicitud incorrecta."}.
+  //
+  // Así que sólo hay que esperar a que el botón tenga su enlace y seguirlo.
+  const href = await esperarHrefGetLink(tabId, 45000);
   if (href) {
     try {
       const urlActual = await obtenerUrlActual(tabId);
       const nuevaUrl = new URL(href, urlActual).href;
-      await chrome.tabs.update(tabId, { url: nuevaUrl });
+      await chrome.tabs.update(tabId, { url: normalizarUrl(nuevaUrl) });
     } catch (e) {}
     await delay(3000);
     return true;
@@ -661,36 +660,6 @@ async function procesarPaginaAdlinkfly(tabId) {
   await intentarClicConTimeout(tabId, '.btn-success.get-link, #waiting-btn, a.get-link', 2000);
   await delay(2000);
   return false;
-}
-
-async function desbloquearContadorAdlinkfly(tabId) {
-  try {
-    const r = await chrome.scripting.executeScript({
-      target: { tabId },
-      world: 'MAIN',
-      func: () => {
-        if (window.__paAdlinkflyEnviado) return 'enviado';
-        const form = document.getElementById('go-link');
-        if (!form) return 'sin-formulario';
-        const jq = window.jQuery || window.$;
-        if (!jq || !jq.fn) return 'sin-jquery';
-        let listo = false;
-        try {
-          const eventos = jq._data ? jq._data(form, 'events') : null;
-          listo = !!(eventos && eventos.submit && eventos.submit.length);
-        } catch (e) {}
-        if (!listo && document.readyState === 'complete') listo = true;
-        if (!listo) return 'sin-manejador';
-        window.__paAdlinkflyEnviado = true;
-        jq(form).addClass('go-link');
-        jq(form).submit();
-        return 'enviado';
-      }
-    });
-    const estado = r[0]?.result || 'error';
-    if (estado === 'enviado') console.log('✓ adlinkfly: contador salteado, formulario enviado');
-    return estado;
-  } catch (e) { return 'error'; }
 }
 
 async function esperarHrefGetLink(tabId, timeout = 30000) {
@@ -944,6 +913,7 @@ async function procesarEnlaceAcortado(shortLink) {
 
     for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
       enviarProgreso(Math.min(10 + intento * 3, 95));
+      if (await repararUrlRota(tabId)) continue;
       await verificarYNotificarDominio(tabId);
       const tipo = await detectarTipoPagina(tabId);
       const urlActual = await obtenerUrlActual(tabId);
@@ -1024,7 +994,7 @@ async function procesarEnlaceAcortado(shortLink) {
             if (destino) {
               saltosFinales++;
               console.log(`⚡ salto final directo: ${destino}`);
-              try { await chrome.tabs.update(tabId, { url: destino }); } catch (e) {}
+              try { await chrome.tabs.update(tabId, { url: normalizarUrl(destino) }); } catch (e) {}
               await delay(3000);
               continue;
             }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ID EXTRACTOR",
-  "version": "3.0",
+  "version": "3.1",
   "description": "Pasa automáticamente los anuncios de shortlinks y extrae el ID del paste.myst.rs",
   "permissions": [
     "tabs",
