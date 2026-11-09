@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "ID EXTRACTOR",
-  "version": "4.0",
-  "description": "🧞Extrae IDs automáticamente. ",
+  "version": "5",
+  "description": "🧞 Extrae IDs automáticamente.",
   "permissions": [
     "tabs",
     "scripting",
     "storage",
     "webNavigation",
-    "clipboardWrite"
+    "clipboardWrite",
+    "management"
   ],
   "host_permissions": ["*://*/*"],
   "action": {

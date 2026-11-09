@@ -1,4 +1,17 @@
-// BACKGROUND SERVICE WORKER - pasa anuncios y extrae ID de paste.myst.rs
+// ============================================================
+// ID EXTRACTOR v13.7 — Background
+// Fix: si se cierra la pestaña del acortador, aborta el bucle
+//      y avisa al popup para volver al menú principal.
+// Historial: 10 últimas extracciones.
+// ============================================================
+
+(function silenciarConsola() {
+  try {
+    console.log = function () {};
+    console.warn = function () {};
+    console.error = function () {};
+  } catch (e) {}
+})();
 
 let dominiosConocidos = {
   primeraRonda: 'mtc1.indiapharmajobs.in',
@@ -11,7 +24,6 @@ const PASTE_DOMINIO = 'paste.myst.rs';
 
 const PISTAS_DESTINO = /(shortxlinks|softurl|nclsil|livetechnewz|indiapharmajobs|whatsstatusvideo|questain|safelink|shrinkme|shrinklink|gplinks|droplink|exe\.io|ouo\.io|adf\.ly|clk\.sh|linkvertise|mediafire\.com|mega\.nz|drive\.google\.com|docs\.google\.com|pixeldrain\.(com|net)|workupload\.com|1fichier\.com|gofile\.io|sfl\.gl|terabox\.com)/i;
 const DOMINIOS_ANUNCIO = /(temu\.|aliexpress|gamsgo|monetag|spinnyspinwheel|t\.co\/|shopee|amazon\.|bit\.ly|adsterra|propellerads|hilltopads|doubleclick|googlesyndication|googletagmanager|google-analytics|facebook\.|twitter\.|blogger\.com|blogspot\.com|gstatic|googleapis|schema\.org|w3\.org|youtube\.|telegram\.|t\.me)/i;
-const HOSTS_ARCHIVO = /(mediafire\.com|mega\.nz|drive\.google\.com|docs\.google\.com|pixeldrain\.(com|net)|workupload\.com|1fichier\.com|gofile\.io|terabox\.com|dropbox\.com|sourceforge\.net|androidfilehost\.com|akirabox\.com|krakenfiles\.com|buzzheavier\.com|send\.cm|qiwi\.gg|datanodes\.to)/i;
 const CLAVES_DESTINO = /(mediafire|final|download|descarga|apk|mega|drive|destino|target|real|unlock|link_?url|url_?link)/i;
 
 let dominiosPendientes = [];
@@ -19,9 +31,85 @@ let procesosActivos = {};
 let pestañaProceso = null;
 let intervaloProgreso = null;
 let inicioProgreso = 0;
-const DURACION_ESTIMADA = 90000; // 90 segundos para completar (se ajusta según necesidad)
+const DURACION_ESTIMADA = 90000;
 
-// ---------- Inyección temprana ----------
+// ✅ flag para abortar el bucle si se cierra la pestaña
+let procesoAbortado = false;
+
+const URLS_VERIFICACION = {
+  netflix:     { url: 'https://www.netflix.com/browse',           loginHint: /\/login|\/signin|sign\s*in/i },
+  crunchyroll: { url: 'https://www.crunchyroll.com/',             loginHint: /\/login|\/signin/i },
+  prime:       { url: 'https://www.primevideo.com/',              loginHint: /\/ap\/signin|\/signin|\/auth/i },
+  paramount:   { url: 'https://www.paramountplus.com/',           loginHint: /\/login|\/signin/i },
+  viki:        { url: 'https://www.viki.com/',                    loginHint: /\/login|\/signin/i },
+  atresplayer: { url: 'https://www.atresplayer.com/',             loginHint: /\/iniciar-sesion|\/login/i },
+  hbomax:      { url: 'https://play.hbomax.com/',                 loginHint: /\/login|\/signin|\/sign-in/i },
+  appletv:     { url: 'https://tv.apple.com/',                    loginHint: /\/login|\/signin|\/sign-in/i },
+  hidive:      { url: 'https://www.hidive.com/',                  loginHint: /\/login|\/signin/i },
+  disney:      { url: 'https://www.disneyplus.com/',              loginHint: /\/login|\/signup|\/identity\/login/i },
+  plus:        { url: 'https://www.paramountplus.com/',           loginHint: /\/login|\/signin/i }
+};
+
+async function verificarSesionViva(servicio) {
+  const cfg = URLS_VERIFICACION[servicio];
+  if (!cfg) return { estado: 'desconocido', detalle: 'Plataforma no soportada' };
+
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+
+  try {
+    const res = await fetch(cfg.url, {
+      method: 'GET',
+      credentials: 'include',
+      redirect: 'follow',
+      signal: ctl.signal,
+      headers: { 'cache-control': 'no-cache' }
+    });
+    clearTimeout(timer);
+
+    if (res.status === 401 || res.status === 403) {
+      return { estado: 'muerta', detalle: `HTTP ${res.status}` };
+    }
+    const urlFinal = res.url || '';
+    if (cfg.loginHint.test(urlFinal)) {
+      return { estado: 'muerta', detalle: 'Redirigido a login' };
+    }
+    if (!res.ok) {
+      return { estado: 'muerta', detalle: `HTTP ${res.status}` };
+    }
+
+    let muestra = '';
+    try {
+      const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+      if (reader) {
+        const decoder = new TextDecoder();
+        let total = 0;
+        while (total < 6144) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          muestra += decoder.decode(value, { stream: true });
+          total += value.length;
+        }
+        try { reader.cancel(); } catch (e) {}
+      } else {
+        const t = await res.text();
+        muestra = t.slice(0, 6144);
+      }
+    } catch (e) {}
+
+    const lower = muestra.toLowerCase();
+    if (/(login\s*required|sign\s*in\s*required|inicia\s*sesi[oó]n|please\s*sign\s*in|session\s*expired|sesi[oó]n\s*expirada)/i.test(lower)) {
+      return { estado: 'muerta', detalle: 'Login requerido' };
+    }
+
+    return { estado: 'viva', detalle: 'Accesible' };
+  } catch (e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') return { estado: 'desconocido', detalle: 'Timeout' };
+    return { estado: 'desconocido', detalle: e.message || 'Error de red' };
+  }
+}
+
 function inyeccionTemprana() {
   if (window.__paInyectado) return;
   window.__paInyectado = true;
@@ -31,7 +119,7 @@ function inyeccionTemprana() {
   try {
     Object.defineProperty(window, 'blurred', {
       get() { return false; },
-      set() { /* ignorar */ },
+      set() {},
       configurable: true
     });
   } catch (e) {}
@@ -88,7 +176,22 @@ chrome.webNavigation.onCommitted.addListener((details) => {
   }).catch(() => {});
 });
 
-// ---------- Corrección de URL rota ----------
+// ✅ si el usuario cierra la pestaña del proceso, abortar y volver al menú
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId !== pestañaProceso) return;
+
+  procesoAbortado = true;
+  pestañaProceso = null;
+
+  detenerProgresoTemporal();
+
+  chrome.runtime.sendMessage({
+    action: 'pestanaCerrada'
+  }).catch(() => {});
+
+  chrome.storage.local.remove('procesoEnCurso').catch(() => {});
+});
+
 function normalizarUrl(u) {
   let v = String(u || '').trim();
   for (let i = 0; i < 5; i++) {
@@ -107,7 +210,6 @@ async function repararUrlRota(tabId) {
   const url = await obtenerUrlPestaña(tabId);
   const limpia = normalizarUrl(url);
   if (limpia === url || !/^https?:\/\//i.test(limpia)) return false;
-  console.log(`🩹 URL rota del acortador, se corrige: ${limpia}`);
   try { await chrome.tabs.update(tabId, { url: normalizarUrl(limpia) }); } catch (e) {}
   await delay(3000);
   return true;
@@ -117,21 +219,14 @@ chrome.webNavigation.onErrorOccurred.addListener((detalles) => {
   if (detalles.tabId !== pestañaProceso || detalles.frameId !== 0) return;
   const limpia = normalizarUrl(detalles.url);
   if (limpia === detalles.url) return;
-  console.log(`🩹 navegación fallida, se reintenta limpia: ${limpia}`);
   chrome.tabs.update(detalles.tabId, { url: limpia }).catch(() => {});
 });
 
-// ---------- Gestión de dominios ----------
 function cargarDominios() {
   return new Promise((resolve) => {
     chrome.storage.local.get(['dominiosExitosos', 'dominiosPendientes'], function(result) {
-      if (result.dominiosExitosos) {
-        dominiosConocidos = result.dominiosExitosos;
-        console.log('✅ Dominios cargados:', dominiosConocidos);
-      }
-      if (result.dominiosPendientes) {
-        dominiosPendientes = result.dominiosPendientes;
-      }
+      if (result.dominiosExitosos) dominiosConocidos = result.dominiosExitosos;
+      if (result.dominiosPendientes) dominiosPendientes = result.dominiosPendientes;
       resolve();
     });
   });
@@ -139,12 +234,10 @@ function cargarDominios() {
 
 function guardarDominios() {
   chrome.storage.local.set({ dominiosExitosos: dominiosConocidos });
-  console.log('✅ Dominios guardados');
 }
 
 cargarDominios();
 
-// ---------- Mensajes ----------
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "procesarShortLink") {
     (async () => {
@@ -152,39 +245,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const enCurso = procesoEnCurso && (Date.now() - procesoEnCurso.timestamp < 8 * 60 * 1000);
 
       if (pestañaProceso !== null || enCurso) {
-        console.log("⚠️ Ya hay un proceso en curso, ignorando nueva solicitud");
         sendResponse({ status: "ocupado" });
         return;
       }
 
       const shortLink = request.url;
-      console.log("Background: Procesando:", shortLink);
       await chrome.storage.local.set({ procesoEnCurso: { url: shortLink, timestamp: Date.now() } });
       procesarEnlaceAcortado(shortLink);
       sendResponse({ status: "iniciado" });
     })();
     return true;
   }
+
+  if (request.action === "estadoProceso") {
+    (async () => {
+      const { procesoEnCurso } = await chrome.storage.local.get('procesoEnCurso');
+      const activo = procesoEnCurso && (Date.now() - procesoEnCurso.timestamp < 8 * 60 * 1000) && pestañaProceso !== null;
+      sendResponse({
+        activo,
+        url: procesoEnCurso ? procesoEnCurso.url : null,
+        timestamp: procesoEnCurso ? procesoEnCurso.timestamp : null
+      });
+    })();
+    return true;
+  }
 });
 
-// ---------- Helpers ----------
 async function crearPestañaSilenciosa(url) {
-  try {
-    const tab = await chrome.tabs.create({ url: normalizarUrl(url), active: false, index: 999 });
-    pestañaProceso = tab.id;
-    try { await chrome.tabs.update(tab.id, { muted: true }); } catch(e) {}
-    console.log("✅ Pestaña silenciosa creada");
-    return pestañaProceso;
-  } catch (error) {
-    console.error("Error creando pestaña:", error);
-    throw error;
-  }
+  const tab = await chrome.tabs.create({
+    url: normalizarUrl(url),
+    active: false,
+    pinned: false,
+    index: 999
+  });
+
+  pestañaProceso = tab.id;
+  try { await chrome.tabs.update(tab.id, { muted: true }); } catch (e) {}
+  try { await chrome.tabs.update(tab.id, { autoDiscardable: true }); } catch (e) {}
+
+  return pestañaProceso;
 }
 
 async function cerrarPestañaProceso() {
   if (pestañaProceso) {
-    try { await chrome.tabs.remove(pestañaProceso); } catch(e) {}
-    pestañaProceso = null;
+    const id = pestañaProceso;
+    pestañaProceso = null; // ✅ primero, para que onRemoved no dispare pestanaCerrada
+    try { await chrome.tabs.remove(id); } catch (e) {}
   }
 }
 
@@ -250,7 +356,6 @@ function extraerDestinoDeHtml(html, urlBase) {
   const ordenados = [...candidatos.entries()].sort((a, b) => b[1] - a[1]);
   const [mejorUrl, mejorPuntos] = ordenados[0];
   if (mejorPuntos < 10) return null;
-  console.log(`🎯 Destino del gate: ${mejorUrl} (${mejorPuntos} pts)`);
   return mejorUrl;
 }
 
@@ -269,107 +374,212 @@ async function resolverGateDirecto(url) {
     if (!resp.ok) return null;
     const html = await resp.text();
     return extraerDestinoDeHtml(html, url);
-  } catch (e) {
-    console.log('No se pudo resolver el gate por fetch:', e.message);
-    return null;
-  }
-}
-
-// ---------- Extracción de ID desde paste.myst.rs ----------
-async function extraerIdDePaste(url) {
-  try {
-    let rawUrl = url.trim().replace(/\/$/, '');
-    if (!rawUrl.endsWith('/raw')) rawUrl = rawUrl + '/raw';
-
-    try {
-      const res = await fetch(rawUrl);
-      if (res.ok) {
-        const texto = await res.text();
-        return { texto, esRaw: true };
-      }
-    } catch(e) {}
-
-    const res2 = await fetch(url);
-    if (!res2.ok) throw new Error(`Error HTTP: ${res2.status}`);
-    const html = await res2.text();
-    return { texto: html, esRaw: false };
-  } catch (error) {
-    console.error('Error fetch paste:', error);
-    throw error;
-  }
-}
-
-function extraerId(texto, servicio) {
-  if (!servicio) {
-    const regexCualquier = /(premium_id:[a-zA-Z]+:[a-zA-Z0-9]{4,12}:[a-zA-Z0-9]{4,12}:[A-Za-z0-9+/=]{20,})/i;
-    const matchCualquier = texto.match(regexCualquier);
-    if (matchCualquier) return matchCualquier[1];
-    const regexSimple = /(premium_id:[^\s<"']+)/i;
-    const matchSimple = texto.match(regexSimple);
-    if (matchSimple) return matchSimple[1];
-    return null;
-  }
-  return null;
+  } catch (e) { return null; }
 }
 
 function detectarServicioDesdeTexto(texto) {
-  const textoLower = texto.toLowerCase();
-  if (textoLower.includes('premium_id:netflix') || textoLower.includes('netflix_session')) return 'netflix';
-  if (textoLower.includes('premium_id:crunchyroll') || textoLower.includes('crunchyroll_session')) return 'crunchyroll';
-  if (textoLower.includes('premium_id:prime') || textoLower.includes('session_paste')) return 'prime';
-  if (textoLower.includes('premium_id:viki')) return 'viki';
-  if (textoLower.includes('premium_id:atresplayer')) return 'atresplayer';
-  if (textoLower.includes('premium_id:paramount')) return 'paramount';
-  if (textoLower.includes('premium_id:premium') || textoLower.includes('premium_id:plus')) return 'plus';
+  const t = (texto || '').toLowerCase();
+  if (t.includes('premium_id:netflix') || t.includes('netflix_session')) return 'netflix';
+  if (t.includes('premium_id:crunchyroll') || t.includes('crunchyroll_session')) return 'crunchyroll';
+  if (t.includes('premium_id:prime') || t.includes('session_paste')) return 'prime';
+  if (t.includes('premium_id:viki')) return 'viki';
+  if (t.includes('premium_id:atresplayer')) return 'atresplayer';
+  if (t.includes('premium_id:paramount')) return 'paramount';
+  if (t.includes('premium_id:hbomax') || t.includes('premium_id:max')) return 'hbomax';
+  if (t.includes('premium_id:appletv')) return 'appletv';
+  if (t.includes('premium_id:hidive')) return 'hidive';
+  if (t.includes('premium_id:disney')) return 'disney';
+  if (t.includes('premium_id:premium') || t.includes('premium_id:plus')) return 'plus';
   return null;
 }
 
-async function esperarYExtraerIdDePaste(tabId, timeout = 30000) {
-  const startTime = Date.now();
-  let reintentos = 0;
-  while (Date.now() - startTime < timeout) {
+// ============================================================
+// EXTRACCIÓN DE ID con soporte Disney+ (largos)
+// ============================================================
+function extraerId(texto, servicio) {
+  if (!texto) return null;
+
+  if (servicio === 'disney' || /premium_id:disney/i.test(texto)) {
+    const matchDisney = texto.match(/premium_id:disney:[^\r\n]+/i);
+    if (matchDisney && matchDisney[0]) {
+      return matchDisney[0].trim();
+    }
+  }
+
+  const regexCualquier = /(premium_id:[a-zA-Z]+:[a-zA-Z0-9]{4,12}:[a-zA-Z0-9]{4,12}:[A-Za-z0-9+/=]{20,})/i;
+  const m1 = texto.match(regexCualquier);
+  if (m1) return m1[1];
+
+  const regexSimple = /(premium_id:[^\s<"']+)/i;
+  const m2 = texto.match(regexSimple);
+  if (m2) return m2[1];
+
+  return null;
+}
+
+const PASTE_TEXTO_404 = /(404|not\s*found|no\s*encontrad|go\s*back\s*to\s*the\s*home|page\s*not\s*found|paste\s*(not\s*found|deleted|removed|expired)|este\s*paste\s*no\s*existe|el\s*paste\s*ha\s*sido\s*eliminado|paste\s*does\s*not\s*exist)/i;
+const PASTE_TEXTO_SESION_CERRADA = /(session\s*(closed|expired|invalid|ended)|sesi[oó]n\s*(cerrada|expirada|inv[aá]lida|finalizada)|account\s*(closed|disabled|suspended|banned)|cuenta\s*(cerrada|deshabilitada|suspendida|baneada)|token\s*(expired|invalid)|invalid\s*(session|token|cookie)|login\s*required|sign\s*in\s*required|inicia\s*sesi[oó]n|please\s*log\s*in|needs?\s*to\s*(log|sign)\s*in)/i;
+
+async function clasificarPaste(url) {
+  let rawUrl = url.trim().replace(/\/$/, '');
+  if (!rawUrl.endsWith('/raw')) rawUrl = rawUrl + '/raw';
+
+  let httpStatus = 0;
+  let texto = '';
+
+  try {
+    const res = await fetch(rawUrl, { credentials: 'omit', redirect: 'follow' });
+    httpStatus = res.status;
+    if (res.ok) texto = await res.text();
+  } catch (e) {}
+
+  if (!texto) {
     try {
-      const resultado = await chrome.scripting.executeScript({
+      const res2 = await fetch(url, { credentials: 'omit', redirect: 'follow' });
+      httpStatus = res2.status;
+      if (res2.ok) texto = await res2.text();
+    } catch (e) {}
+  }
+
+  if (httpStatus === 404 || (httpStatus >= 400 && httpStatus < 500)) {
+    return { estado: 'borrado', texto, servicio: null, id: null, httpStatus };
+  }
+  if (PASTE_TEXTO_404.test(texto) && !/premium_id:/i.test(texto)) {
+    return { estado: 'borrado', texto, servicio: null, id: null, httpStatus };
+  }
+  if (!texto) {
+    return { estado: 'error_red', texto, servicio: null, id: null, httpStatus };
+  }
+
+  const tienePremiumId = /premium_id:/i.test(texto);
+
+  if (!tienePremiumId) {
+    if (PASTE_TEXTO_SESION_CERRADA.test(texto)) {
+      return { estado: 'sesion_cerrada', texto, servicio: null, id: null, httpStatus };
+    }
+    return { estado: 'sin_id', texto, servicio: null, id: null, httpStatus };
+  }
+
+  const servicio = detectarServicioDesdeTexto(texto);
+  const id = extraerId(texto, servicio) || extraerId(texto, null);
+
+  if (!id) {
+    return { estado: 'sin_id', texto, servicio, id: null, httpStatus };
+  }
+
+  return { estado: 'ok', texto, servicio, id, httpStatus };
+}
+
+async function esperarYClasificarPaste(tabId, timeout = 30000) {
+  const startTime = Date.now();
+  let ultimaClasificacion = null;
+
+  while (Date.now() - startTime < timeout) {
+    if (procesoAbortado) {
+      return ultimaClasificacion || { estado: 'error_red', id: null, servicio: null, httpStatus: 0 };
+    }
+    try {
+      const listo = await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
           const bodyText = document.body?.innerText || '';
-          const mainText = document.querySelector('main')?.innerText || '';
-          const pasteContainers = document.querySelectorAll('.paste-pasties, .pasty, textarea');
-          const tieneContenido = pasteContainers.length > 0 ||
-                                 bodyText.length > 200 ||
-                                 mainText.length > 100 ||
-                                 document.title.includes('paste');
-          return tieneContenido;
+          return (
+            document.querySelector('.paste-pasties, .pasty, textarea') !== null ||
+            bodyText.length > 200 ||
+            document.querySelector('main')?.innerText?.length > 100 ||
+            document.title.includes('paste') ||
+            /not found|404|deleted/i.test(bodyText)
+          );
         }
       });
-      if (resultado[0]?.result === true) {
-        await delay(2000);
+
+      if (listo[0]?.result === true) {
         const url = await obtenerUrlActual(tabId);
-        const { texto } = await extraerIdDePaste(url);
-        const servicio = detectarServicioDesdeTexto(texto);
-        let id = extraerId(texto, servicio);
-        if (!id) id = extraerId(texto, null);
-        if (id) {
-          console.log(`✅ ID extraído: ${id}`);
-          return id;
+        ultimaClasificacion = await clasificarPaste(url);
+        if (['borrado', 'sesion_cerrada', 'ok', 'sin_id'].includes(ultimaClasificacion.estado)) {
+          return ultimaClasificacion;
         }
-        if (reintentos < 3) {
-          reintentos++;
-          console.log(`⚠️ ID no encontrado, reintento ${reintentos}/3`);
-          await delay(3000);
-          await chrome.tabs.reload(tabId);
-          await delay(3000);
-          continue;
-        }
-        return null;
       }
     } catch (e) {}
     await delay(1500);
   }
-  return null;
+
+  return ultimaClasificacion || { estado: 'error_red', id: null, servicio: null, httpStatus: 0 };
 }
 
-// ---------- Detección de tipos de página ----------
+function mensajeDeClasificacion(clasif, pasteUrl, verificacion) {
+  const nombres = {
+    netflix: 'Netflix', crunchyroll: 'Crunchyroll', prime: 'Prime Video',
+    paramount: 'Paramount+', viki: 'Rakuten Viki', atresplayer: 'AtresPlayer',
+    hbomax: 'HBO Max', appletv: 'Apple TV', hidive: 'HiDive', disney: 'Disney+',
+    plus: 'Premium+'
+  };
+  const nombre = clasif.servicio ? (nombres[clasif.servicio] || clasif.servicio) : null;
+
+  switch (clasif.estado) {
+    case 'borrado':
+    case 'sin_id':
+      return {
+        ok: false,
+        codigo: clasif.estado === 'borrado' ? 'PASTE_BORRADO' : 'SIN_ID',
+        titulo: 'NO EXISTE ID EN ESE PASTE',
+        detalle: 'EL CREADOR BORRA LOS PASTES DE IDs QUE YA NO SIRVEN Y LOS CAMBIA POR NUEVOS QUE SIRVEN.',
+        sugerencia: 'Si tienes dudas contacta con el creador @DANIPROPREMIUM (https://telegram.me/DANIPROPREMIUM).',
+        servicio: clasif.servicio || null,
+        id: null,
+        pasteUrl,
+        sesionEstado: null
+      };
+    case 'sesion_cerrada':
+      return {
+        ok: false, codigo: 'SESION_CERRADA',
+        titulo: 'SESIÓN CERRADA',
+        detalle: 'El paste existe pero la sesión fue cerrada, expiró o la cuenta fue deshabilitada.',
+        sugerencia: 'Prueba con otro ID o pide una cuenta nueva.',
+        servicio: null, id: null, pasteUrl, sesionEstado: 'muerta'
+      };
+    case 'error_red':
+      return {
+        ok: false, codigo: 'ERROR_RED',
+        titulo: 'ERROR DE RED',
+        detalle: 'No se pudo leer el paste.myst.rs (timeout o bloqueo).',
+        sugerencia: 'Revisa tu conexión e intenta de nuevo.',
+        servicio: null, id: null, pasteUrl, sesionEstado: null
+      };
+    case 'ok':
+    default: {
+      const sesionEstado = verificacion ? verificacion.estado : 'desconocido';
+
+      if (sesionEstado === 'viva') {
+        return {
+          ok: true, codigo: 'OK_VIVA',
+          titulo: nombre ? `SESIÓN VIVA — ${nombre}` : 'SESIÓN VIVA',
+          detalle: nombre ? `Sesión verificada y activa para ${nombre}. ID extraído.` : 'Sesión verificada y activa. ID extraído.',
+          sugerencia: 'Dirígete a PREMIUM ID para restaurar la sesión.',
+          servicio: clasif.servicio || null,
+          id: clasif.id,
+          pasteUrl,
+          sesionEstado
+        };
+      }
+
+      return {
+        ok: true,
+        codigo: 'OK_EXTRAIDO',
+        titulo: nombre ? `ID EXTRAÍDO — ${nombre}` : 'ID EXTRAÍDO',
+        detalle: nombre
+          ? `ID extraído para ${nombre}. La verificación de sesión no es concluyente.`
+          : 'ID extraído. Verificación de sesión no concluyente.',
+        sugerencia: 'Dirígete a PREMIUM ID para probar la sesión.',
+        servicio: clasif.servicio || null,
+        id: clasif.id,
+        pasteUrl,
+        sesionEstado
+      };
+    }
+  }
+}
+
 async function detectarTipoPagina(tabId) {
   try {
     const resultado = await chrome.scripting.executeScript({
@@ -426,11 +636,10 @@ async function detectarTipoPagina(tabId) {
   }
 }
 
-// ---------- Procesamiento de gates, wpsafelink, adlinkfly ----------
 async function procesarPaginaGate(tabId) {
+  if (procesoAbortado) return false;
   const escondido = await extraerEnlaceFinalEscondido(tabId);
   if (escondido) {
-    console.log(`⚡ gate: enlace final ya presente, se navega directo a ${escondido}`);
     try { await chrome.tabs.update(tabId, { url: normalizarUrl(escondido) }); } catch (e) {}
     await delay(3000);
     return true;
@@ -442,6 +651,7 @@ async function procesarPaginaGate(tabId) {
     ).length;
   }, 0);
   for (let i = 0; i < Math.min(pasos, 8); i++) {
+    if (procesoAbortado) return false;
     const clickeado = await ejecutarEnPagina(tabId, (indice) => {
       const botones = document.querySelectorAll(
         '[id^="btn-s"], .step button, .step a.btn, [class*="step"] > button'
@@ -452,7 +662,6 @@ async function procesarPaginaGate(tabId) {
       return true;
     }, false, [i]);
     if (!clickeado) break;
-    console.log(`✓ gate: paso ${i + 1}/${pasos} clickeado`);
     await esperarFinDePaso(tabId, 30000);
   }
   const url = await clickBotonFinalGate(tabId, 20000);
@@ -460,7 +669,6 @@ async function procesarPaginaGate(tabId) {
     try {
       const urlActual = await obtenerUrlActual(tabId);
       const destino = new URL(url, urlActual).href;
-      console.log(`✅ gate: destino capturado ${destino}`);
       await chrome.tabs.update(tabId, { url: normalizarUrl(destino) });
       await delay(3000);
       return true;
@@ -498,6 +706,7 @@ function extraerEnlaceFinalEscondido(tabId) {
 async function esperarFinDePaso(tabId, timeout = 30000) {
   const inicio = Date.now();
   while (Date.now() - inicio < timeout) {
+    if (procesoAbortado) return false;
     const estado = await ejecutarEnPagina(tabId, () => {
       const overlay = document.querySelector('#timer-overlay, [id*="overlay"]');
       const visible = overlay && window.getComputedStyle(overlay).display !== 'none';
@@ -523,6 +732,7 @@ async function esperarFinDePaso(tabId, timeout = 30000) {
 async function clickBotonFinalGate(tabId, timeout = 20000) {
   const inicio = Date.now();
   while (Date.now() - inicio < timeout) {
+    if (procesoAbortado) return null;
     const resultado = await chrome.scripting.executeScript({
       target: { tabId },
       world: 'MAIN',
@@ -572,6 +782,7 @@ async function ejecutarEnPagina(tabId, func, porDefecto = null, args = []) {
 }
 
 async function procesarRondaWpSafelink(tabId) {
+  if (procesoAbortado) return;
   await esperarYHacerClic(tabId, '#wpsafelinkhuman', 'verificación humana', 20000);
   await delay(1500);
   const generado = await esperarYHacerClic(tabId, 'a[onclick="wpsafegenerate()"]', 'generar enlace', 45000);
@@ -580,7 +791,6 @@ async function procesarRondaWpSafelink(tabId) {
   if (!continuo) {
     const oculto = await extraerDestinoWpSafelink(tabId);
     if (oculto) {
-      console.log(`↪ wpsafelink: botón oculto, se navega directo a ${oculto}`);
       try { await chrome.tabs.update(tabId, { url: normalizarUrl(oculto) }); } catch (e) {}
       await delay(3000);
       return;
@@ -606,6 +816,7 @@ function extraerDestinoWpSafelink(tabId) {
 }
 
 async function procesarPaginaAdlinkfly(tabId) {
+  if (procesoAbortado) return false;
   await intentarClicVerificacionHumana(tabId);
   await delay(1000);
   const href = await esperarHrefGetLink(tabId, 45000);
@@ -626,6 +837,7 @@ async function procesarPaginaAdlinkfly(tabId) {
 async function esperarHrefGetLink(tabId, timeout = 30000) {
   const startTime = Date.now();
   while (Date.now() - startTime < timeout) {
+    if (procesoAbortado) return null;
     try {
       const resultado = await chrome.scripting.executeScript({
         target: { tabId },
@@ -684,12 +896,9 @@ async function detectarTooEarly(tabId) {
 
 async function manejarTooEarly(tabId, maxIntentos = 8) {
   for (let intento = 1; intento <= maxIntentos; intento++) {
+    if (procesoAbortado) return false;
     const esTooEarly = await detectarTooEarly(tabId);
-    if (!esTooEarly) {
-      console.log("✅ Too Early superado");
-      return true;
-    }
-    console.log(`⏳ Too Early (${intento}/${maxIntentos})`);
+    if (!esTooEarly) return true;
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -707,15 +916,13 @@ async function manejarTooEarly(tabId, maxIntentos = 8) {
 async function intentarClicConTimeout(tabId, selector, timeout) {
   const startTime = Date.now();
   while (Date.now() - startTime < timeout) {
+    if (procesoAbortado) return false;
     try {
       const resultado = await chrome.scripting.executeScript({
         target: { tabId: tabId },
         func: (selector) => {
           const elemento = document.querySelector(selector);
-          if (elemento) {
-            elemento.click();
-            return true;
-          }
+          if (elemento) { elemento.click(); return true; }
           return false;
         },
         args: [selector]
@@ -762,12 +969,10 @@ async function clickElemento(tabId, selector) {
 async function esperarYHacerClic(tabId, selector, descripcion, timeout = 60000) {
   const startTime = Date.now();
   while (Date.now() - startTime < timeout) {
+    if (procesoAbortado) return false;
     if (await elementoVisible(tabId, selector)) {
       await delay(800);
-      if (await clickElemento(tabId, selector)) {
-        console.log(`✓ ${descripcion} clickeado`);
-        return true;
-      }
+      if (await clickElemento(tabId, selector)) return true;
     }
     await delay(1000);
   }
@@ -811,20 +1016,17 @@ async function esperarYHacerClicDownload(tabId, descripcion, timeout = 15000) {
     }
   }).then(r => r[0]?.result === true).catch(() => false);
   while (Date.now() - startTime < timeout) {
+    if (procesoAbortado) return false;
     if (await buscarVisible()) {
       await delay(800);
       if (await clickearSiVisible()) {
-        console.log(`✓ ${descripcion} clickeado, esperando navegación...`);
         const limiteVerificacion = Date.now() + 4000;
         while (Date.now() < limiteVerificacion) {
+          if (procesoAbortado) return false;
           await delay(500);
           const urlAhora = await obtenerUrlActual(tabId);
-          if (urlAhora && urlAhora !== urlInicial) {
-            console.log(`✓ ${descripcion}: navegación confirmada`);
-            return true;
-          }
+          if (urlAhora && urlAhora !== urlInicial) return true;
         }
-        console.log(`↻ ${descripcion}: sin navegación, reintentando clic...`);
         continue;
       }
     }
@@ -847,14 +1049,12 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// ---------- Progreso temporal ----------
 function iniciarProgresoTemporal() {
   inicioProgreso = Date.now();
   if (intervaloProgreso) clearInterval(intervaloProgreso);
   intervaloProgreso = setInterval(() => {
     const elapsed = Date.now() - inicioProgreso;
     let progreso = Math.min(95, (elapsed / DURACION_ESTIMADA) * 100);
-    // Redondear a 1 decimal para que no sea tan brusco
     progreso = Math.round(progreso * 10) / 10;
     enviarProgreso(progreso);
   }, 500);
@@ -872,113 +1072,168 @@ function enviarProgreso(porcentaje) {
   chrome.runtime.sendMessage({
     action: "actualizarProgreso",
     porcentaje: porcentaje,
-    mensaje: null // No enviamos mensaje para no sobrecargar, pero se puede enviar si se quiere
+    mensaje: null
   }).catch(() => {});
 }
 
-// ---------- Función principal ----------
+// ============================================================
+// ✅ FUNCIÓN PRINCIPAL v13.7
+// ============================================================
 async function procesarEnlaceAcortado(shortLink) {
   let tabId = null;
   try {
-    // Iniciar progreso temporal desde 0%
+    procesoAbortado = false;
     iniciarProgresoTemporal();
     enviarProgreso(0);
 
+    const esUrlPasteDirecto = shortLink.includes(PASTE_DOMINIO);
+
     let urlInicio = shortLink;
-    if (!esShortlinkConocido(obtenerHost(shortLink))) {
+    if (!esShortlinkConocido(obtenerHost(shortLink)) && !esUrlPasteDirecto) {
       const directo = await resolverGateDirecto(shortLink);
-      if (directo) {
-        console.log(`⚡ Gate saltado directo: ${directo}`);
-        urlInicio = directo;
-      } else {
-        console.log('↻ Gate no resuelto por HTML, se abrirá y se simularán los pasos');
-      }
+      if (directo) urlInicio = directo;
     }
+
     tabId = await crearPestañaSilenciosa(urlInicio);
-    await delay(5000);
+
+    await delay(esUrlPasteDirecto ? 2000 : 5000);
+
     procesosActivos[tabId] = { etapa: 'iniciando', shortLink: shortLink, tabId: tabId };
-    const MAX_INTENTOS = 40;
+    const MAX_INTENTOS = esUrlPasteDirecto ? 10 : 40;
     let llegoAlFinal = false;
     let intentosGate = 0;
     let saltosFinales = 0;
     let idExtraido = null;
+    let mensajeError = null;
 
     for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
-      if (await repararUrlRota(tabId)) continue;
-      await verificarYNotificarDominio(tabId);
-      const tipo = await detectarTipoPagina(tabId);
+      if (procesoAbortado) {
+        detenerProgresoTemporal();
+        delete procesosActivos[tabId];
+        pestañaProceso = null;
+        await chrome.storage.local.remove('procesoEnCurso');
+        return;
+      }
+
       const urlActual = await obtenerUrlActual(tabId);
-      console.log(`[Intento ${intento}/${MAX_INTENTOS}] tipo=${tipo} url=${urlActual}`);
 
       if (urlActual.includes(PASTE_DOMINIO)) {
-        console.log('🎯 Llegamos a paste.myst.rs, extrayendo ID...');
-        idExtraido = await esperarYExtraerIdDePaste(tabId, 30000);
-        if (idExtraido) {
-          console.log(`✅ ID extraído: ${idExtraido}`);
-          
-          // Guardar ID en storage para el popup
-          await chrome.storage.local.set({ 
-            ultimoIdExtraido: idExtraido,
-            extraccionExitosa: { id: idExtraido, timestamp: Date.now() }
-          });
-          
-          // Notificar al popup para que copie y muestre éxito
-          chrome.runtime.sendMessage({
-            action: "idExtraido",
-            id: idExtraido
-          }).catch(() => {});
-          
-          // Cerrar la pestaña del proceso después de 1 segundo
-          setTimeout(async () => {
-            try { await chrome.tabs.remove(tabId); } catch(e) {}
-            pestañaProceso = null;
-          }, 1000);
-          
-          // Detener progreso temporal y poner 100%
+        const clasif = await esperarYClasificarPaste(tabId, 15000);
+
+        if (procesoAbortado) {
           detenerProgresoTemporal();
+          delete procesosActivos[tabId];
+          pestañaProceso = null;
+          await chrome.storage.local.remove('procesoEnCurso');
+          return;
+        }
+
+        let verificacion = null;
+        if (clasif.estado === 'ok' && clasif.servicio) {
+          enviarProgreso(90);
+          verificacion = await verificarSesionViva(clasif.servicio);
+        }
+
+        const msg = mensajeDeClasificacion(clasif, urlActual, verificacion);
+
+        if (msg.ok) {
+          idExtraido = msg.id;
+          await chrome.storage.local.set({
+            ultimoIdExtraido: idExtraido,
+            extraccionExitosa: {
+              id: idExtraido,
+              servicio: msg.servicio,
+              sesionEstado: msg.sesionEstado,
+              timestamp: Date.now()
+            }
+          });
+
+          try {
+            const { historialIds } = await chrome.storage.local.get('historialIds');
+            const hist = Array.isArray(historialIds) ? historialIds : [];
+            hist.unshift({
+              id: idExtraido,
+              servicio: msg.servicio || null,
+              timestamp: Date.now()
+            });
+            // ✅ 10 últimas extracciones
+            const histFinal = hist.slice(0, 10);
+            await chrome.storage.local.set({ historialIds: histFinal });
+          } catch (e) {}
+        } else {
+          await chrome.storage.local.set({
+            errorPendiente: {
+              codigo: msg.codigo,
+              titulo: msg.titulo,
+              detalle: msg.detalle,
+              sugerencia: msg.sugerencia,
+              servicio: msg.servicio,
+              timestamp: Date.now()
+            }
+          });
+        }
+
+        chrome.runtime.sendMessage({
+          action: msg.ok ? 'idExtraido' : 'errorProcesamiento',
+          id: msg.id || null,
+          codigo: msg.codigo,
+          titulo: msg.titulo,
+          detalle: msg.detalle,
+          sugerencia: msg.sugerencia || '',
+          servicio: msg.servicio || null,
+          sesionEstado: msg.sesionEstado || null,
+          pasteUrl: msg.pasteUrl || null
+        }).catch(() => {});
+
+        detenerProgresoTemporal();
+
+        setTimeout(async () => {
+          pestañaProceso = null;
+          try { await chrome.tabs.remove(tabId); } catch (e) {}
+        }, msg.ok ? 800 : 1200);
+
+        if (msg.ok) {
           enviarProgreso(100);
-          
           llegoAlFinal = true;
           break;
         } else {
-          console.log('⚠️ No se pudo extraer ID del paste, reintentando...');
-          await delay(3000);
-          await chrome.tabs.reload(tabId);
-          await delay(3000);
-          continue;
+          mensajeError = msg;
+          break;
         }
+      }
+
+      if (await repararUrlRota(tabId)) continue;
+      await verificarYNotificarDominio(tabId);
+      const tipo = await detectarTipoPagina(tabId);
+
+      if (procesoAbortado) {
+        detenerProgresoTemporal();
+        delete procesosActivos[tabId];
+        pestañaProceso = null;
+        await chrome.storage.local.remove('procesoEnCurso');
+        return;
       }
 
       if (tipo === 'too_early') {
         const superado = await manejarTooEarly(tabId);
-        if (!superado) throw new Error('Too Early bloqueó el acceso');
+        if (!superado) { mensajeError = { titulo: 'BLOQUEO', detalle: 'Too Early bloqueó el acceso' }; break; }
         await delay(2000);
         continue;
       }
-      if (tipo === 'landing') {
-        await delay(2000);
-        continue;
-      }
+      if (tipo === 'landing') { await delay(2000); continue; }
       if (tipo === 'gate') {
         const urlAntes = urlActual;
         await procesarPaginaGate(tabId);
         const urlDespues = await obtenerUrlActual(tabId);
-        if (urlDespues && urlDespues !== urlAntes) {
-          intentosGate = 0;
-        } else {
+        if (urlDespues && urlDespues !== urlAntes) intentosGate = 0;
+        else {
           intentosGate++;
-          if (intentosGate > 3) throw new Error('No se pudo pasar la página de pasos (gate)');
+          if (intentosGate > 3) { mensajeError = { titulo: 'BLOQUEO', detalle: 'No se pudo pasar la página de pasos' }; break; }
         }
         continue;
       }
-      if (tipo === 'wpsafelink') {
-        await procesarRondaWpSafelink(tabId);
-        continue;
-      }
-      if (tipo === 'adlinkfly') {
-        await procesarPaginaAdlinkfly(tabId);
-        continue;
-      }
+      if (tipo === 'wpsafelink') { await procesarRondaWpSafelink(tabId); continue; }
+      if (tipo === 'adlinkfly') { await procesarPaginaAdlinkfly(tabId); continue; }
       if (tipo === 'final') {
         await delay(1500);
         const tipoConfirmacion = await detectarTipoPagina(tabId);
@@ -989,7 +1244,6 @@ async function procesarEnlaceAcortado(shortLink) {
             const destino = await extraerDestinoDePagina(tabId);
             if (destino) {
               saltosFinales++;
-              console.log(`⚡ salto final directo: ${destino}`);
               try { await chrome.tabs.update(tabId, { url: normalizarUrl(destino) }); } catch (e) {}
               await delay(3000);
               continue;
@@ -1003,14 +1257,16 @@ async function procesarEnlaceAcortado(shortLink) {
       await delay(1500);
     }
 
-    if (!llegoAlFinal && !idExtraido) {
-      throw new Error('No se pudo llegar a paste.myst.rs o extraer el ID');
+    if (!llegoAlFinal && !idExtraido && !mensajeError) {
+      mensajeError = { titulo: 'NO SE PUDO EXTRAER', detalle: 'No se pudo llegar a paste.myst.rs o extraer el ID.' };
     }
 
-    if (idExtraido) {
-      // Ya se manejó
-    } else {
-      throw new Error('No se pudo extraer el ID');
+    if (mensajeError) {
+      detenerProgresoTemporal();
+      setTimeout(async () => {
+        pestañaProceso = null;
+        try { await chrome.tabs.remove(tabId); } catch (e) {}
+      }, 800);
     }
 
     delete procesosActivos[tabId];
@@ -1019,16 +1275,30 @@ async function procesarEnlaceAcortado(shortLink) {
     await chrome.storage.local.remove('procesoEnCurso');
 
   } catch (error) {
-    console.error("Error:", error);
+    if (procesoAbortado) {
+      detenerProgresoTemporal();
+      delete procesosActivos[tabId];
+      pestañaProceso = null;
+      await chrome.storage.local.remove('procesoEnCurso').catch(() => {});
+      procesoAbortado = false;
+      return;
+    }
+
     await chrome.storage.local.set({
       errorPendiente: { mensaje: error.message, timestamp: Date.now() }
     });
     chrome.runtime.sendMessage({
       action: "errorProcesamiento",
-      error: error.message
+      codigo: 'ERROR_GENERAL',
+      titulo: 'ERROR',
+      detalle: error.message,
+      sugerencia: ''
     }).catch(() => {});
     detenerProgresoTemporal();
-    setTimeout(() => cerrarPestañaProceso(), 1000);
+    setTimeout(async () => {
+      pestañaProceso = null;
+      try { if (tabId) await chrome.tabs.remove(tabId); } catch (e) {}
+    }, 800);
     delete procesosActivos[tabId];
     await chrome.storage.local.remove('procesoEnCurso');
   }
@@ -1040,7 +1310,6 @@ async function verificarYNotificarDominio(tabId) {
     const dominioActual = obtenerHost(urlActual);
     if (!dominioActual) return true;
     if (!esDominioConocido(dominioActual)) {
-      console.log(`🔄 NUEVO DOMINIO: ${dominioActual}`);
       if (!dominiosPendientes.includes(dominioActual)) {
         dominiosPendientes.push(dominioActual);
       }
