@@ -3,15 +3,20 @@
 <!-- ======================================= -->
 
 <!-- Título Principal -->
-<h1 align="center">ID EXTRACTOR v4.0</h1>
+<h1 align="center">ID EXTRACTOR v5</h1>
 
 <!-- Imagen Principal (Screenshot o Logo) -->
 <p align="center">
-  <img width="480" height="405" alt="Image" src="https://github.com/user-attachments/assets/5d14cfed-f3e1-4406-84fb-8d4d66579e91" />
+  <img width="480" height="405" alt="Image" src="https://github.com/user-attachments/assets/747a4292-1f71-453b-9d5c-e0a40724241a" />
 </p>
 
 <p align="center">
 <img src="https://badgen.net/badge/PARA%20WINDOWS/PC?icon=windows&labelColor=555555&scale=2" alt="PARA PC / WINDOWS">
+</p>
+
+<!-- Insignia para Android -->
+<p align="center">
+  <img src="https://badgen.net/badge/PARA%20TITANIUM%20BROWSER/ANDROID?icon=android&color=3DDC84&scale=2" alt="PARA ANDROID">
 </p>
 
 <!-- Insignia para Android -->
@@ -27,13 +32,27 @@
   <img src="https://img.shields.io/badge/PARA%20QUETTA%20BROWSER-ANDROID?style=for-the-badge&logo=android&logoColor=white&color=3DDC84" alt="PARA QUETTA BROWSER EN ANDROID">
   <img src="https://img.shields.io/badge/PARA%20NAVEGADORES%20CHROMIUM-CHROMIUM?style=for-the-badge&logo=google-chrome&logoColor=white&color=4285F4" alt="PARA NAVEGADORES CHROMIUM">
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License">
-  <img src="https://img.shields.io/badge/version-4.0-blue.svg?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-5-blue.svg?style=for-the-badge" alt="Version">
 </p>  
 
 ---
 # 🧞 ID EXTRACTOR
 
 Extrae IDs automáticamente del acortador **shortxlinks**.
+
+# 🧞 ID EXTRACTOR — Novedades
+
+## ✅ Historial de 10 IDs
+Ahora guarda las últimas **10 extracciones** (antes 5).
+
+## ✅ Cierre de pestaña seguro
+Si cierras por accidente la pestaña del acortador, la extensión **vuelve sola al menú principal**. Sin bucles, sin bloqueos. Puedes pegar otra URL al momento.
+
+## ✅ Copia ID manual
+La ID se copia cuando **TÚ pulsas el botón**, para asegurar que fue copiada correctamente.
+
+## ✅ Modo día y noche
+Cambia entre **tema oscuro y claro** con el botón 🌙 / ☀️ de la esquina superior. Tu preferencia se guarda automáticamente.
 
 ## ⚡ Uso rápido
 
