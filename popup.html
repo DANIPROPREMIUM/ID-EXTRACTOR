@@ -17,6 +17,14 @@
       transition: background 0.3s ease, color 0.3s ease;
     }
 
+    body.modo-pestana {
+      width: 100% !important;
+      min-width: 360px;
+      max-width: 520px;
+      margin: 0 auto;
+      overflow: visible;
+    }
+
     body.tema-claro { background: #f2f2f7; color: #0a0a0e; }
 
     body::before {
@@ -25,7 +33,6 @@
       width: 400px; height: 300px;
       background: radial-gradient(ellipse, rgba(255, 215, 0, 0.06), transparent 70%);
       pointer-events: none; z-index: 0;
-      transition: background 0.3s ease;
     }
 
     body.tema-claro::before {
@@ -34,7 +41,6 @@
 
     .wrap { position: relative; z-index: 1; padding: 26px 24px 16px; }
 
-    /* ===== HEADER ===== */
     .brand { text-align: center; margin-bottom: 18px; position: relative; }
 
     .brand h1 {
@@ -63,7 +69,6 @@
 
     body.tema-claro .brand p { color: rgba(184, 134, 11, 0.7); }
 
-    /* ===== TOGGLE TEMA ===== */
     .theme-toggle {
       position: absolute; top: -6px; right: 0;
       width: 30px; height: 30px;
@@ -87,7 +92,6 @@
 
     body.tema-claro .theme-toggle:hover { background: rgba(0, 0, 0, 0.12); }
 
-    /* ===== INPUT ===== */
     .field { margin-bottom: 12px; transition: opacity 0.25s ease; }
     .field.hidden { display: none; }
     .field-top { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
@@ -218,7 +222,6 @@
 
     button.main:active:not(:disabled) { transform: translateY(0) scale(0.99); }
 
-    /* ===== HISTORIAL ===== */
     .historial {
       display: none;
       margin-top: 10px;
@@ -235,7 +238,6 @@
 
     .historial.show { display: block; }
 
-    /* ✅ 10 ranuras: scroll interno si hay muchas */
     #histList {
       max-height: 220px;
       overflow-y: auto;
@@ -354,7 +356,6 @@
       transform: scale(1.15);
     }
 
-    /* ===== PROGRESO ===== */
     .progress {
       display: none;
       flex-direction: column;
@@ -495,7 +496,69 @@
     .warn-tab.show { display: block; }
     @keyframes warnPulse { 0%, 100% { background: rgba(255, 184, 0, 0.08); border-color: rgba(255, 184, 0, 0.28); } 50% { background: rgba(255, 184, 0, 0.15); border-color: rgba(255, 184, 0, 0.5); } }
 
-    /* ===== PROGRESO DIRECTO (para paste.myst.rs sin lámpara) ===== */
+    /* ===== AVISO ADBLOCK (sin botón, con cuenta atrás) ===== */
+    .adblock-tab {
+      display: none;
+      margin-top: 8px;
+      padding: 16px 16px 14px;
+      background: rgba(255, 82, 82, 0.12);
+      border: 2px solid rgba(255, 82, 82, 0.6);
+      border-radius: 10px;
+      font-family: 'Inter', sans-serif;
+      color: #FFFFFF;
+      line-height: 1.5;
+      animation: adblockPulse 1.5s ease-in-out infinite;
+      text-align: center;
+    }
+    .adblock-tab.show { display: block; }
+    .adblock-tab-title {
+      font-size: 14px;
+      font-weight: 900;
+      color: #ff8080;
+      margin-bottom: 10px;
+      letter-spacing: 0.3px;
+      text-shadow: 0 0 6px rgba(255, 82, 82, 0.6);
+    }
+    .adblock-tab-text {
+      font-size: 12px;
+      color: #ffb0b0;
+      font-weight: 600;
+      margin-bottom: 12px;
+      line-height: 1.55;
+    }
+    .adblock-tab-text strong {
+      color: #FFFFFF;
+      font-weight: 900;
+      text-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+    }
+    .adblock-countdown {
+      font-size: 12px;
+      font-weight: 800;
+      color: #FFFFFF;
+      margin-top: 10px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 82, 82, 0.4);
+      letter-spacing: 0.3px;
+    }
+    .adblock-countdown strong {
+      display: inline-block;
+      min-width: 28px;
+      font-size: 22px;
+      font-weight: 900;
+      color: #FFD700;
+      vertical-align: middle;
+      text-shadow: 0 0 8px #FFD700, 0 0 16px #FFB800, 0 1px 2px rgba(0, 0, 0, 0.9);
+      animation: adblockNum 1s ease-in-out infinite;
+    }
+    @keyframes adblockNum {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.15); }
+    }
+    @keyframes adblockPulse {
+      0%, 100% { background: rgba(255, 82, 82, 0.12); border-color: rgba(255, 82, 82, 0.6); }
+      50% { background: rgba(255, 82, 82, 0.2); border-color: rgba(255, 82, 82, 0.9); }
+    }
+
     .progress-directa {
       display: none;
       flex-direction: column;
@@ -537,7 +600,6 @@
       50% { opacity: 1; }
     }
 
-    /* ===== ERROR ===== */
     .err { display: none; padding: 12px 0 0; }
     .err.show { display: block; animation: fadeIn 0.4s ease; }
     .err-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; color: #ff8080; margin-bottom: 8px; letter-spacing: 0.2px; }
@@ -550,7 +612,6 @@
     body.tema-claro .err-tg a { color: #b8860b; border-bottom-color: rgba(184, 134, 11, 0.3); }
     .err-tg a:hover { color: #ffe680; border-bottom-color: #ffe680; }
 
-    /* ===== ÉXITO ===== */
     .ok { display: none; text-align: center; padding: 10px 0 0; }
     .ok.show { display: block; animation: fadeIn 0.4s ease 0.8s both; }
     .ok-title { font-size: 12px; font-weight: 800; color: #00ff88; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; }
@@ -601,7 +662,6 @@
       50% { opacity: 1; transform: scale(1.2) rotate(180deg); }
     }
 
-    /* ===== PANEL DE LA ID ===== */
     .id-panel {
       background: #0f0f14;
       border: 1px solid rgba(0, 255, 136, 0.3);
@@ -734,7 +794,7 @@
         </label>
       </div>
       <div class="input-row">
-        <input type="url" id="link" placeholder="https://shortxlinks.in/..." autocomplete="off" spellcheck="false">
+        <input type="url" id="link" placeholder="https://xl.gl/..." autocomplete="off" spellcheck="false">
         <button class="clear-btn" id="clearBtn" title="Limpiar" type="button">✕</button>
       </div>
       <button class="main" id="btn" type="button">EXTRAER ID</button>
@@ -748,7 +808,6 @@
       <div id="histList"></div>
     </div>
 
-    <!-- PROGRESO NORMAL (con lámpara + genio) -->
     <div class="progress" id="progress">
       <div class="scene">
         <div class="genie" id="genie">🧞‍♂️</div>
@@ -780,9 +839,18 @@
       <div class="warn-tab" id="warnTab">
         ⚠️ No cierres la pestaña del acortador
       </div>
-    </div>
 
-    <!-- PROGRESO DIRECTO (para paste.myst.rs, sin lámpara, sin genio, sin %) -->
+      <div class="adblock-tab" id="adblockTab">
+        <div class="adblock-tab-title">⚠️ DESACTIVA EL BLOQUEADOR DE ANUNCIOS</div>
+        <div class="adblock-tab-text">
+          La página de destino requiere ver los anuncios.<br>
+          Desactívalo en tu navegador y <strong>vuelve a extraer la ID</strong>.
+        </div>
+        <div class="adblock-countdown">
+          Volviendo al inicio en <strong id="adblockCountdown">10</strong>s…
+        </div>
+      </div>
+
     <div class="progress-directa" id="progressDirecta">
       <div class="directa-spinner"></div>
       <div class="directa-txt" id="directaTxt">Extrayendo ID…</div>
@@ -816,7 +884,7 @@
       </div>
     </div>
 
-    <div class="foot">v5</div>
+    <div class="foot">v7</div>
   </div>
 
   <canvas id="confetti"></canvas>

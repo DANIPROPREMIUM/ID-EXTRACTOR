@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ID EXTRACTOR",
-  "version": "5",
+  "version": "7",
   "description": "🧞 Extrae IDs automáticamente.",
   "permissions": [
     "tabs",
@@ -9,7 +9,8 @@
     "storage",
     "webNavigation",
     "clipboardWrite",
-    "management"
+    "management",
+    "alarms"
   ],
   "host_permissions": ["*://*/*"],
   "action": {
