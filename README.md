@@ -43,7 +43,7 @@ Extrae IDs automáticamente.
 # 🧞 ID EXTRACTOR — Novedades
 
 ## ✅ Historial de 10 IDs
-Ahora guarda las últimas **10 extracciones** (antes 5).
+Ahora guarda las últimas **10 extracciones**.
 
 ## ✅ Cierre de pestaña seguro
 Si cierras por accidente la pestaña del acortador, la extensión **vuelve sola al menú principal**. Sin bucles, sin bloqueos. Puedes pegar otra URL al momento.
