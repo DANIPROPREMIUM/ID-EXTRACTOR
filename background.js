@@ -1,9 +1,9 @@
 // ============================================================
-// ID EXTRACTOR v15.3 — Background
-// - xl.gl en SEGUNDO PLANO (active: false) → popup no se cierra
-// - Fallback: si captcha no se resuelve en 30s, activa pestaña
-// - Detección genérica por texto de botón
-// - ADBLOCK: avisa al popup SIN cerrar pestaña, espera abortarProceso
+// ID EXTRACTOR v16.1 — Background
+// - Detección GENÉRICA de reward dialog (cualquier prefijo)
+// - NO depende de hoftm/wrfpv/prdij/yuqdh/tisyl/nrxua/kavoy
+// - Limpia procesoEnCurso al arrancar/instalar
+// - Verifica pestaña existe antes de "ocupado"
 // ============================================================
 
 (function silenciarConsola() {
@@ -39,7 +39,7 @@ async function xlLog(tabId, msg) {
     const { debugXlGl } = await chrome.storage.local.get('debugXlGl');
     const arr = Array.isArray(debugXlGl) ? debugXlGl : [];
     arr.push({ t: Date.now(), tabId, url, msg: String(msg) });
-    await chrome.storage.local.set({ debugXlGl: arr.slice(-150) });
+    await chrome.storage.local.set({ debugXlGl: arr.slice(-250) });
   } catch (e) {}
 }
 
@@ -145,6 +145,7 @@ chrome.webNavigation.onCommitted.addListener((details) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId !== pestañaProceso) return;
+  xlLog(null, `onRemoved: pestaña proceso ${tabId} cerrada`);
   procesoAbortado = true;
   pestañaProceso = null;
   detenerProgresoTemporal();
@@ -195,19 +196,61 @@ function cargarDominios() {
 function guardarDominios() { chrome.storage.local.set({ dominiosExitosos: dominiosConocidos }); }
 cargarDominios();
 
+chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.remove('procesoEnCurso').catch(() => {});
+  pestañaProceso = null;
+});
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.remove('procesoEnCurso').catch(() => {});
+  pestañaProceso = null;
+});
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "procesarShortLink") {
     (async () => {
       const { procesoEnCurso } = await chrome.storage.local.get('procesoEnCurso');
       const enCurso = procesoEnCurso && (Date.now() - procesoEnCurso.timestamp < 8 * 60 * 1000);
-      if (pestañaProceso !== null || enCurso) { sendResponse({ status: "ocupado" }); return; }
+
+      let bloqueado = false;
+
+      if (pestañaProceso !== null) {
+        bloqueado = true;
+      } else if (enCurso) {
+        if (procesoEnCurso.tabId) {
+          try {
+            const tab = await chrome.tabs.get(procesoEnCurso.tabId);
+            if (tab) {
+              pestañaProceso = procesoEnCurso.tabId;
+              bloqueado = true;
+            } else {
+              await chrome.storage.local.remove('procesoEnCurso');
+              bloqueado = false;
+            }
+          } catch (e) {
+            await chrome.storage.local.remove('procesoEnCurso');
+            bloqueado = false;
+          }
+        } else {
+          const edad = Date.now() - procesoEnCurso.timestamp;
+          if (edad > 60000) {
+            await chrome.storage.local.remove('procesoEnCurso');
+            bloqueado = false;
+          } else {
+            bloqueado = true;
+          }
+        }
+      }
+
+      if (bloqueado) { sendResponse({ status: "ocupado" }); return; }
+
       const shortLink = request.url;
-      await chrome.storage.local.set({ procesoEnCurso: { url: shortLink, timestamp: Date.now() } });
+      await chrome.storage.local.set({ procesoEnCurso: { url: shortLink, timestamp: Date.now(), tabId: null } });
       procesarEnlaceAcortado(shortLink);
       sendResponse({ status: "iniciado" });
     })();
     return true;
   }
+
   if (request.action === "estadoProceso") {
     (async () => {
       const { procesoEnCurso } = await chrome.storage.local.get('procesoEnCurso');
@@ -216,7 +259,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     })();
     return true;
   }
-  // Abortar proceso (llamado por el popup tras la cuenta atrás del adblock)
+
   if (request.action === "abortarProceso") {
     (async () => {
       procesoAbortado = true;
@@ -235,16 +278,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 });
 
 async function crearPestañaSilenciosa(url) {
-  const tab = await chrome.tabs.create({
-    url: normalizarUrl(url),
-    active: false,
-    pinned: false,
-    index: 999
-  });
-  pestañaProceso = tab.id;
-  try { await chrome.tabs.update(tab.id, { muted: true }); } catch (e) {}
-  try { await chrome.tabs.update(tab.id, { autoDiscardable: false }); } catch (e) {}
-  return pestañaProceso;
+  const urlNorm = normalizarUrl(url);
+  await xlLog(null, `crearPestañaSilenciosa inicio url="${url}" urlNorm="${urlNorm}"`);
+  if (!urlNorm || !/^https?:\/\//i.test(urlNorm)) {
+    await xlLog(null, `crearPestañaSilenciosa ERROR: URL invalida "${urlNorm}"`);
+    throw new Error('URL invalida: ' + urlNorm);
+  }
+  try {
+    const tab = await chrome.tabs.create({ url: urlNorm, active: false, pinned: false, index: 999 });
+    pestañaProceso = tab.id;
+    await xlLog(tab.id, `crearPestañaSilenciosa OK tabId=${tab.id} url="${urlNorm}"`);
+    try { await chrome.tabs.update(tab.id, { muted: true }); } catch (e) {}
+    try { await chrome.tabs.update(tab.id, { autoDiscardable: false }); } catch (e) {}
+    try {
+      const { procesoEnCurso } = await chrome.storage.local.get('procesoEnCurso');
+      if (procesoEnCurso) {
+        procesoEnCurso.tabId = tab.id;
+        await chrome.storage.local.set({ procesoEnCurso });
+      }
+    } catch (e) {}
+    return pestañaProceso;
+  } catch (e) {
+    await xlLog(null, `crearPestañaSilenciosa ERROR: ${e.message}`);
+    throw e;
+  }
 }
 
 async function cerrarPestañaProceso() {
@@ -451,7 +508,15 @@ async function detectarTipoPagina(tabId) {
           return 'adblock';
         }
 
-        if (/(^|\.)xl\.gl$/i.test(host) || bodyClass.includes('prdij-page') || bodyClass.includes('yuqdh-page') || bodyClass.includes('tisyl-page') || bodyClass.includes('nrxua-page') || bodyClass.includes('wrfpv-page') || document.querySelector('.cf-turnstile') || document.getElementById('_mcl')) return 'xlgl';
+        // ✅ Detección genérica: cualquier página con data-*-step o form data-*-form
+        if (/(^|\.)xl\.gl$/i.test(host) ||
+            /-page(\s|$)/i.test(bodyClass) && document.querySelector('[data-hoftm-step], [data-wrfpv-step], [data-prdij-step], [data-yuqdh-step], [data-tisyl-step], [data-nrxua-step], [data-kavoy-step]') ||
+            document.querySelector('.cf-turnstile') ||
+            document.getElementById('_mcl') ||
+            document.querySelector('form[data-hoftm-form], form[data-wrfpv-form], form[data-prdij-form], form[data-yuqdh-form], form[data-tisyl-form], form[data-nrxua-form], form[data-kavoy-form]')) {
+          return 'xlgl';
+        }
+
         if (document.getElementById('wpsafelinkhuman') || document.getElementById('wpsafe-generate') || document.getElementById('wpsafe-link') || document.getElementById('wpsafelink-landing')) return 'wpsafelink';
         if (document.getElementById('go-link') || document.getElementById('waiting-btn') || document.querySelector('.get-link')) return 'adlinkfly';
         const h1 = document.querySelector('h1');
@@ -491,6 +556,9 @@ async function esperarNavegacion(tabId, urlAntes, timeout = 15000) {
   return false;
 }
 
+// ============================================================
+// INSPECCIÓN GENÉRICA (cualquier prefijo xl.gl)
+// ============================================================
 async function xlGlInspeccionar(tabId) {
   return ejecutarEnPagina(tabId, () => {
     function esAvanzar(txt) {
@@ -508,11 +576,11 @@ async function xlGlInspeccionar(tabId) {
       const t = (txt || '').trim().toLowerCase();
       return /start\s*timer/i.test(t) || /iniciar\s*temporizador/i.test(t) || /^start$/i.test(t) || /empezar/i.test(t);
     }
-    function estaHabilitado(btn) {
-      if (!btn) return false;
-      if (btn.disabled) return false;
-      if (btn.classList.contains('is-idle') || btn.classList.contains('is-paused')) return false;
-      const estilo = window.getComputedStyle(btn);
+    function estaHabilitado(el) {
+      if (!el) return false;
+      if (el.disabled) return false;
+      if (el.classList.contains('is-idle') || el.classList.contains('is-paused')) return false;
+      const estilo = window.getComputedStyle(el);
       if (estilo.display === 'none' || estilo.visibility === 'hidden') return false;
       return true;
     }
@@ -525,17 +593,45 @@ async function xlGlInspeccionar(tabId) {
       for (const b of document.querySelectorAll('input[type="submit"]')) if (pred(b.value)) return b;
       return null;
     }
+
+    // ✅ GENÉRICO: cualquier dialog[open] con botón dentro → reward dialog
+    function buscarRewardDialogGenerico() {
+      const dialogs = document.querySelectorAll('dialog[open]');
+      for (const d of dialogs) {
+        const btn = d.querySelector('button[type="submit"], button');
+        if (btn) return d;
+      }
+      // También cualquier elemento con data-*-reward[open]
+      const el = document.querySelector('[data-hoftm-reward][open], [data-wrfpv-reward][open], [data-prdij-reward][open], [data-yuqdh-reward][open], [data-tisyl-reward][open], [data-nrxua-reward][open], [data-kavoy-reward][open]');
+      if (el) return el;
+      return null;
+    }
+    function buscarAdOverlay() {
+      const el = document.getElementById('ad_position_box');
+      if (!el) return false;
+      const estilo = window.getComputedStyle(el);
+      return estilo.display !== 'none' && estilo.visibility !== 'hidden';
+    }
+
+    const tieneAdOverlay = buscarAdOverlay();
+    const dialogReward = buscarRewardDialogGenerico();
     const btnAdvance = buscarBoton(esAvanzar);
     const btnStart = buscarBoton(esStart);
     const turnstileResp = document.querySelector('input[name="cf-turnstile-response"]');
     const turnstileOk = turnstileResp ? !!turnstileResp.value : false;
     const tieneTurnstile = !!document.querySelector('.cf-turnstile') || !!turnstileResp;
+
     let fase = 'otra';
-    if (btnStart) fase = 'start_timer';
+    if (dialogReward) fase = 'reward_dialog';
+    else if (tieneAdOverlay) fase = 'ad_overlay';
+    else if (btnStart) fase = 'start_timer';
     else if (btnAdvance) fase = 'advance';
     else if (tieneTurnstile) fase = 'wait_turnstile';
+
     return {
       fase, tieneTurnstile, turnstileOk,
+      tieneAdOverlay,
+      tieneDialog: !!dialogReward,
       tieneAdvance: !!btnAdvance,
       advanceHabilitado: estaHabilitado(btnAdvance),
       advanceTexto: btnAdvance ? (btnAdvance.textContent || '').trim().substring(0, 30) : '',
@@ -560,14 +656,21 @@ async function xlGlClickAdvance(tabId) {
       return false;
     }
     let target = null;
-    for (const b of document.querySelectorAll('button')) if (esAvanzar(b.textContent) && !b.disabled) { target = b; break; }
+    for (const b of document.querySelectorAll('button')) if (esAvanzar(b.textContent)) { target = b; break; }
     if (!target) {
       for (const f of document.querySelectorAll('form')) {
         const b = f.querySelector('button[type="submit"]');
-        if (b && esAvanzar(b.textContent) && !b.disabled) { target = b; break; }
+        if (b && esAvanzar(b.textContent)) { target = b; break; }
       }
     }
-    if (target) { target.click(); return true; }
+    if (target) {
+      if (target.disabled) {
+        target.disabled = false;
+        target.removeAttribute('disabled');
+      }
+      target.click();
+      return true;
+    }
     return false;
   }, false);
 }
@@ -591,15 +694,234 @@ async function xlGlClickStart(tabId) {
   }, false);
 }
 
-async function procesarPaginaXlGl(tabId) {
+// ✅ GENÉRICO: pulsar botón del dialog open o cualquier [data-*-reward-continue]
+async function xlGlClickRewardDialog(tabId) {
+  return ejecutarEnPagina(tabId, () => {
+    function esContinuar(txt) {
+      const t = (txt || '').trim().toLowerCase();
+      return t === 'continue' || t === 'continuar' || t === 'get link' || t === 'getlink' || t === 'obtener enlace' || t === 'ver enlace' || /^continue/i.test(t) || /^get\s*link/i.test(t);
+    }
+    // 1) Botones con data-*-reward-continue de cualquier prefijo
+    const sels = [
+      '[data-hoftm-reward-continue]', '[data-wrfpv-reward-continue]',
+      '[data-prdij-reward-continue]', '[data-yuqdh-reward-continue]',
+      '[data-tisyl-reward-continue]', '[data-nrxua-reward-continue]',
+      '[data-kavoy-reward-continue]'
+    ];
+    for (const s of sels) {
+      const btn = document.querySelector(s);
+      if (btn) { btn.disabled = false; btn.removeAttribute('disabled'); btn.click(); return true; }
+    }
+    // 2) Botón dentro de cualquier dialog[open]
+    const dialogs = document.querySelectorAll('dialog[open]');
+    for (const d of dialogs) {
+      const btn = d.querySelector('button[type="submit"], button');
+      if (btn) { btn.disabled = false; btn.removeAttribute('disabled'); btn.click(); return true; }
+    }
+    // 3) Cualquier botón con texto "Continue"/"Get Link" que esté en un dialog
+    for (const d of dialogs) {
+      for (const b of d.querySelectorAll('button')) {
+        if (esContinuar(b.textContent)) { b.disabled = false; b.removeAttribute('disabled'); b.click(); return true; }
+      }
+    }
+    return false;
+  }, false);
+}
+
+// ✅ GENÉRICO: forzar submit del form con proof del JSON genérico
+async function xlGlForzarForm(tabId) {
+  return ejecutarEnPagina(tabId, () => {
+    function esAvanzar(txt) {
+      const t = (txt || '').trim().toLowerCase();
+      const exactos = ['continue', 'continuar', 'get link', 'getlink', 'obtener enlace', 'obtener link', 'ver enlace', 'ir al enlace', 'go', 'go to link', 'proceed', 'proceder', 'next', 'siguiente', 'unlock', 'destino'];
+      if (exactos.includes(t)) return true;
+      if (t.length > 40) return false;
+      if (/^get\s*link/i.test(t)) return true;
+      if (/^continue/i.test(t)) return true;
+      return false;
+    }
+
+    // Buscar cualquier form cuyo button[type=submit] esté fuera de un dialog
+    let form = null;
+    for (const f of document.querySelectorAll('form')) {
+      const btn = f.querySelector('button[type="submit"]');
+      if (!btn) continue;
+      if (btn.closest('dialog')) continue;
+      if (!esAvanzar(btn.textContent)) continue;
+      form = f;
+      break;
+    }
+    if (!form) return false;
+
+    // Extraer proof del JSON *-step-data de cualquier prefijo
+    let proof = '';
+    const ids = ['hoftm-step-data', 'wrfpv-step-data', 'prdij-step-data', 'yuqdh-step-data', 'tisyl-step-data', 'nrxua-step-data', 'kavoy-step-data'];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      try {
+        const data = JSON.parse(el.textContent || '{}');
+        if (data.proof) { proof = data.proof; break; }
+      } catch (e) {}
+    }
+
+    // Rellenar inputs con cualquier prefijo
+    const prefijos = ['hoftm', 'wrfpv', 'prdij', 'yuqdh', 'tisyl', 'nrxua', 'kavoy'];
+    for (const pref of prefijos) {
+      const inputRew = form.querySelector(`input[name="${pref}_rewarded"]`);
+      if (inputRew && !inputRew.value) inputRew.value = 'unavailable';
+      const inputProof = form.querySelector(`input[name="${pref}_proof"]`);
+      if (inputProof && !inputProof.value && proof) inputProof.value = proof;
+      const inputConsent = form.querySelector(`input[name="${pref}_consent"]`);
+      if (inputConsent && !inputConsent.value) inputConsent.value = 'not_applicable';
+      const inputMcl = form.querySelector(`input[name="${pref}_mcl"]`);
+      if (inputMcl && !inputMcl.value) inputMcl.value = 'ok';
+    }
+
+    try {
+      HTMLFormElement.prototype.submit.call(form);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }, false);
+}
+
+// ============================================================
+// MANEJO DEL REWARDED AD DE GOOGLE
+// ============================================================
+async function xlGlManejarAdOverlay(tabId, _prof = 0) {
+  await xlLog(tabId, `xlGlManejarAdOverlay inicio (prof=${_prof})`);
+
+  // 1) ¿Dialog de "Thanks for watching" ya visible?
+  const tieneDialog = await ejecutarEnPagina(tabId, () => {
+    const dialogs = document.querySelectorAll('dialog[open]');
+    for (const d of dialogs) if (d.querySelector('button')) return true;
+    return !!document.querySelector('[data-hoftm-reward][open], [data-wrfpv-reward][open], [data-prdij-reward][open], [data-yuqdh-reward][open], [data-tisyl-reward][open], [data-nrxua-reward][open], [data-kavoy-reward][open]');
+  }, false);
+  if (tieneDialog) {
+    await xlLog(tabId, 'ad_overlay: dialog ya visible → pulsando');
+    await xlGlClickRewardDialog(tabId);
+    await delay(2000);
+    return 'dialog';
+  }
+
+  // 2) ¿Botón close-button real visible?
+  const tieneCloseReal = await ejecutarEnPagina(tabId, () => {
+    const btn = document.getElementById('close-button');
+    if (!btn) return false;
+    const estilo = window.getComputedStyle(btn);
+    return estilo.display !== 'none' && estilo.visibility !== 'hidden';
+  }, false);
+  if (tieneCloseReal) {
+    await xlLog(tabId, 'ad_overlay: close-button real visible → pulsando');
+    await ejecutarEnPagina(tabId, () => {
+      const btn = document.getElementById('close-button');
+      if (btn) { btn.disabled = false; btn.classList.remove('disabled'); btn.click(); }
+    }, null);
+    await delay(2000);
+    return 'closed-real';
+  }
+
+  // 3) Esperar hasta 20s a close real o dialog
+  await xlLog(tabId, 'ad_overlay: esperando hasta 20s a close real o dialog');
+  for (let i = 0; i < 20; i++) {
+    if (procesoAbortado) return 'abortado';
+    await delay(1000);
+
+    const ahoraDialog = await ejecutarEnPagina(tabId, () => {
+      const dialogs = document.querySelectorAll('dialog[open]');
+      for (const d of dialogs) if (d.querySelector('button')) return true;
+      return false;
+    }, false);
+    if (ahoraDialog) {
+      await xlLog(tabId, `ad_overlay: dialog apareció tras ${i+1}s → pulsando`);
+      await xlGlClickRewardDialog(tabId);
+      await delay(2000);
+      return 'dialog-late';
+    }
+
+    const ahoraCloseReal = await ejecutarEnPagina(tabId, () => {
+      const btn = document.getElementById('close-button');
+      if (!btn) return false;
+      const estilo = window.getComputedStyle(btn);
+      return estilo.display !== 'none' && estilo.visibility !== 'hidden';
+    }, false);
+    if (ahoraCloseReal) {
+      await xlLog(tabId, `ad_overlay: close real visible tras ${i+1}s → pulsando`);
+      await ejecutarEnPagina(tabId, () => {
+        const btn = document.getElementById('close-button');
+        if (btn) { btn.disabled = false; btn.classList.remove('disabled'); btn.click(); }
+      }, null);
+      await delay(2000);
+      return 'closed-real-late';
+    }
+  }
+
+  // 4) Último recurso: pulsar dismiss-button-element
+  await xlLog(tabId, 'ad_overlay: 20s sin close real ni dialog → pulsando dismiss-button-element');
+  await ejecutarEnPagina(tabId, () => {
+    const btn = document.getElementById('dismiss-button-element');
+    if (btn) btn.click();
+  }, null);
+  await delay(3000);
+
+  const sigue = await ejecutarEnPagina(tabId, () => {
+    const el = document.getElementById('ad_position_box');
+    if (!el) return false;
+    const estilo = window.getComputedStyle(el);
+    return estilo.display !== 'none' && estilo.visibility !== 'hidden';
+  }, false);
+
+  if (!sigue) {
+    await xlLog(tabId, 'ad_overlay: dismiss-button-element cerró el overlay');
+    return 'dismiss-ok';
+  }
+
+  if (_prof > 1) {
+    await xlLog(tabId, 'ad_overlay: ya eliminado una vez, forzando form');
+    await xlGlForzarForm(tabId);
+    await delay(3000);
+    return 'forzado';
+  }
+
+  await xlLog(tabId, 'ad_overlay: eliminando overlay del ad');
+  await ejecutarEnPagina(tabId, () => {
+    document.querySelectorAll('#ad_position_box, .close-button-outer, #dismiss-button, #ad_iframe, .creative').forEach(el => {
+      try { el.remove(); } catch (e) {}
+    });
+  }, null);
+  await delay(1500);
+
+  return await xlGlManejarAdOverlay(tabId, _prof + 1);
+}
+
+async function procesarPaginaXlGl(tabId, _prof = 0) {
   if (procesoAbortado) return false;
-  await xlLog(tabId, 'procesarPaginaXlGl inicio');
+  await xlLog(tabId, `procesarPaginaXlGl inicio (prof=${_prof})`);
 
   await prepararGate(tabId);
   await delay(800);
 
   const inspeccion = await xlGlInspeccionar(tabId);
-  await xlLog(tabId, `inspeccion fase=${inspeccion.fase} bodyClass="${inspeccion.bodyClass}" turnstile=${inspeccion.tieneTurnstile}/${inspeccion.turnstileOk} advance=${inspeccion.tieneAdvance}(${inspeccion.advanceHabilitado})"${inspeccion.advanceTexto}" start=${inspeccion.tieneStart}(${inspeccion.startHabilitado})`);
+  await xlLog(tabId, `inspeccion fase=${inspeccion.fase} bodyClass="${inspeccion.bodyClass}" turnstile=${inspeccion.tieneTurnstile}/${inspeccion.turnstileOk} adOverlay=${inspeccion.tieneAdOverlay} dialog=${inspeccion.tieneDialog} advance=${inspeccion.tieneAdvance}(${inspeccion.advanceHabilitado})"${inspeccion.advanceTexto}" start=${inspeccion.tieneStart}(${inspeccion.startHabilitado})`);
+
+  if (inspeccion.fase === 'reward_dialog') {
+    if (_prof > 6) { await xlLog(tabId, 'reward_dialog: demasiadas iteraciones'); return false; }
+    await xlLog(tabId, 'fase reward_dialog: pulsando Get Link del dialog');
+    const ok = await xlGlClickRewardDialog(tabId);
+    await xlLog(tabId, `reward_dialog click=${ok}`);
+    await delay(3000);
+    return await procesarPaginaXlGl(tabId, _prof + 1);
+  }
+
+  if (inspeccion.fase === 'ad_overlay') {
+    if (_prof > 3) { await xlLog(tabId, 'ad_overlay: demasiadas iteraciones, forzando form'); await xlGlForzarForm(tabId); await delay(3000); return true; }
+    const resultado = await xlGlManejarAdOverlay(tabId, 0);
+    await xlLog(tabId, `ad_overlay resultado=${resultado}`);
+    if (resultado === 'forzado') return true;
+    return await procesarPaginaXlGl(tabId, _prof + 1);
+  }
 
   if (inspeccion.fase === 'advance' || inspeccion.fase === 'wait_turnstile') {
     await xlLog(tabId, 'fase advance: esperando turnstile + boton habilitado');
@@ -609,6 +931,9 @@ async function procesarPaginaXlGl(tabId) {
     while (Date.now() - inicio < 30000) {
       if (procesoAbortado) break;
       const ins = await xlGlInspeccionar(tabId);
+      if (ins.fase === 'ad_overlay' || ins.fase === 'reward_dialog') {
+        return await procesarPaginaXlGl(tabId, _prof + 1);
+      }
       if (ins.tieneAdvance && ins.advanceHabilitado) {
         if (ins.tieneTurnstile && !ins.turnstileOk) { /* aún no */ }
         else { listo = true; break; }
@@ -623,11 +948,13 @@ async function procesarPaginaXlGl(tabId) {
         await chrome.windows.update(tab.windowId, { focused: true });
         await chrome.tabs.update(tabId, { active: true });
       } catch (e) {}
-
       const inicio2 = Date.now();
       while (Date.now() - inicio2 < 90000) {
         if (procesoAbortado) break;
         const ins = await xlGlInspeccionar(tabId);
+        if (ins.fase === 'ad_overlay' || ins.fase === 'reward_dialog') {
+          return await procesarPaginaXlGl(tabId, _prof + 1);
+        }
         if (ins.tieneAdvance && ins.advanceHabilitado) {
           if (!(ins.tieneTurnstile && !ins.turnstileOk)) { listo = true; break; }
         }
@@ -650,23 +977,39 @@ async function procesarPaginaXlGl(tabId) {
     const clickOk = await xlGlClickAdvance(tabId);
     await xlLog(tabId, `fase advance click=${clickOk}`);
 
-    let navegó = await esperarNavegacion(tabId, urlAntes, 20000);
+    let navegó = await esperarNavegacion(tabId, urlAntes, 5000);
     await xlLog(tabId, `fase advance tras click navego=${navegó}`);
 
     if (!navegó) {
-      await xlLog(tabId, 'fase advance: reintentando');
+      const ins = await xlGlInspeccionar(tabId);
+      if (ins.fase === 'ad_overlay' || ins.fase === 'reward_dialog') {
+        await xlLog(tabId, `advance: apareció ${ins.fase}, recursión`);
+        return await procesarPaginaXlGl(tabId, _prof + 1);
+      }
+    }
+
+    if (!navegó) {
+      await xlLog(tabId, 'advance: forzando form nativo');
+      const formOk = await xlGlForzarForm(tabId);
+      await xlLog(tabId, `advance forzarForm=${formOk}`);
+      navegó = await esperarNavegacion(tabId, urlAntes, 15000);
+      await xlLog(tabId, `advance tras forzarForm navego=${navegó}`);
+    }
+
+    if (!navegó) {
+      await xlLog(tabId, 'advance: reintentando click normal');
       await delay(2000);
       await xlGlClickAdvance(tabId);
       navegó = await esperarNavegacion(tabId, urlAntes, 15000);
-      await xlLog(tabId, `fase advance reintento navego=${navegó}`);
+      await xlLog(tabId, `advance reintento navego=${navegó}`);
     }
 
     if (!navegó) await delay(3000);
 
     const siguiente = await xlGlInspeccionar(tabId);
     await xlLog(tabId, `fase advance siguiente=${siguiente.fase} bodyClass="${siguiente.bodyClass}"`);
-    if (siguiente.fase === 'start_timer' || siguiente.fase === 'advance' || siguiente.fase === 'wait_turnstile') {
-      return await procesarPaginaXlGl(tabId);
+    if (siguiente.fase === 'ad_overlay' || siguiente.fase === 'reward_dialog' || siguiente.fase === 'start_timer' || siguiente.fase === 'advance' || siguiente.fase === 'wait_turnstile') {
+      return await procesarPaginaXlGl(tabId, _prof + 1);
     }
     return true;
   }
@@ -683,6 +1026,9 @@ async function procesarPaginaXlGl(tabId) {
     while (Date.now() - inicio < 90000) {
       if (procesoAbortado) break;
       const ins = await xlGlInspeccionar(tabId);
+      if (ins.fase === 'ad_overlay' || ins.fase === 'reward_dialog') {
+        return await procesarPaginaXlGl(tabId, _prof + 1);
+      }
       if (ins.tieneAdvance && ins.advanceHabilitado) { listo = true; break; }
       await delay(1000);
     }
@@ -693,15 +1039,21 @@ async function procesarPaginaXlGl(tabId) {
     await delay(800);
     const urlAntes = await obtenerUrlActual(tabId);
     await xlGlClickAdvance(tabId);
-    let navegó = await esperarNavegacion(tabId, urlAntes, 20000);
+    let navegó = await esperarNavegacion(tabId, urlAntes, 5000);
     await xlLog(tabId, `fase start_timer tras click navego=${navegó}`);
 
     if (!navegó) {
-      await xlLog(tabId, 'fase start_timer: reintentando');
-      await delay(2000);
-      await xlGlClickAdvance(tabId);
+      const ins = await xlGlInspeccionar(tabId);
+      if (ins.fase === 'ad_overlay' || ins.fase === 'reward_dialog') {
+        await xlLog(tabId, `start_timer: apareció ${ins.fase}, recursión`);
+        return await procesarPaginaXlGl(tabId, _prof + 1);
+      }
+    }
+    if (!navegó) {
+      await xlLog(tabId, 'start_timer: forzando form nativo');
+      await xlGlForzarForm(tabId);
       navegó = await esperarNavegacion(tabId, urlAntes, 15000);
-      await xlLog(tabId, `fase start_timer reintento navego=${navegó}`);
+      await xlLog(tabId, `start_timer tras forzarForm navego=${navegó}`);
     }
 
     if (!navegó) await delay(3000);
@@ -709,8 +1061,8 @@ async function procesarPaginaXlGl(tabId) {
     const siguiente = await xlGlInspeccionar(tabId);
     await xlLog(tabId, `fase start_timer siguiente=${siguiente.fase} bodyClass="${siguiente.bodyClass}"`);
 
-    if (siguiente.fase === 'start_timer' || siguiente.fase === 'advance' || siguiente.fase === 'wait_turnstile') {
-      return await procesarPaginaXlGl(tabId);
+    if (siguiente.fase === 'ad_overlay' || siguiente.fase === 'reward_dialog' || siguiente.fase === 'start_timer' || siguiente.fase === 'advance' || siguiente.fase === 'wait_turnstile') {
+      return await procesarPaginaXlGl(tabId, _prof + 1);
     }
     if (siguiente.fase === 'otra') {
       const destino = await extraerDestinoDePagina(tabId);
@@ -727,6 +1079,13 @@ async function procesarPaginaXlGl(tabId) {
   const destino = await extraerDestinoDePagina(tabId);
   await xlLog(tabId, `otra fase destino=${destino || 'null'}`);
   if (destino) { try { await chrome.tabs.update(tabId, { url: normalizarUrl(destino) }); } catch (e) {} await delay(3000); return true; }
+
+  const hostActual = obtenerHost(await obtenerUrlActual(tabId));
+  if (/(^|\.)xl\.gl$/i.test(hostActual)) {
+    await xlLog(tabId, 'otra fase en xl.gl: forzando form como último recurso');
+    const formOk = await xlGlForzarForm(tabId);
+    if (formOk) { await delay(3000); return true; }
+  }
   return false;
 }
 
@@ -1108,6 +1467,9 @@ async function procesarEnlaceAcortado(shortLink) {
     iniciarProgresoTemporal();
     enviarProgreso(0);
     try { await chrome.storage.local.set({ debugXlGl: [] }); } catch (e) {}
+    try { await chrome.storage.local.remove('resultadoPendiente'); } catch (e) {}
+
+    await xlLog(null, `procesarEnlaceAcortado inicio shortLink="${shortLink}"`);
 
     const esUrlPasteDirecto = shortLink.includes(PASTE_DOMINIO);
     let urlInicio = shortLink;
@@ -1153,7 +1515,11 @@ async function procesarEnlaceAcortado(shortLink) {
 
         if (msg.ok) {
           idExtraido = msg.id;
-          await chrome.storage.local.set({ ultimoIdExtraido: idExtraido, extraccionExitosa: { id: idExtraido, servicio: msg.servicio, sesionEstado: msg.sesionEstado, timestamp: Date.now() } });
+          await chrome.storage.local.set({
+            ultimoIdExtraido: idExtraido,
+            extraccionExitosa: { id: idExtraido, servicio: msg.servicio, sesionEstado: msg.sesionEstado, timestamp: Date.now() },
+            resultadoPendiente: { id: idExtraido, servicio: msg.servicio || null, sesionEstado: msg.sesionEstado || null, timestamp: Date.now() }
+          });
           try {
             const { historialIds } = await chrome.storage.local.get('historialIds');
             const hist = Array.isArray(historialIds) ? historialIds : [];
@@ -1188,41 +1554,27 @@ async function procesarEnlaceAcortado(shortLink) {
         await chrome.storage.local.remove('procesoEnCurso'); return;
       }
 
-      // ✅ ADBLOCK: avisar al popup SIN cerrar la pestaña.
-      // El popup mostrará el cartel y a los 10s llamará a abortarProceso.
       if (tipo === 'adblock') {
-        await xlLog(tabId, 'adblock detectado → avisando al popup (NO cerrando pestaña)');
+        await xlLog(tabId, 'adblock detectado → avisando al popup');
         actualizarBadge('ADB', '#ff5252');
         detenerProgresoTemporal();
         chrome.runtime.sendMessage({ action: 'avisoAdblock' }).catch(() => {});
 
-        // Esperar a que el popup pida abortar (10s) o a que el usuario cierre la pestaña
         const inicioEspera = Date.now();
         while (Date.now() - inicioEspera < 15000) {
-          if (procesoAbortado) {
-            await xlLog(tabId, 'adblock: abortarProceso recibido del popup');
-            return;
-          }
-          try {
-            await chrome.tabs.get(tabId);
-          } catch (e) {
-            await xlLog(tabId, 'adblock: pestaña cerrada manualmente');
-            delete procesosActivos[tabId];
-            pestañaProceso = null;
+          if (procesoAbortado) { await xlLog(tabId, 'adblock: abortarProceso recibido'); return; }
+          try { await chrome.tabs.get(tabId); }
+          catch (e) {
+            delete procesosActivos[tabId]; pestañaProceso = null;
             await chrome.storage.local.remove('procesoEnCurso').catch(() => {});
             return;
           }
           await delay(500);
         }
-
-        // Salvaguarda: si nadie abortó en 15s, cerrar aquí
-        await xlLog(tabId, 'adblock: timeout sin abortarProceso, cerrando por seguridad');
         try { await chrome.tabs.remove(tabId); } catch (e) {}
-        pestañaProceso = null;
-        actualizarBadge('', '#888888');
+        pestañaProceso = null; actualizarBadge('', '#888888');
         await chrome.storage.local.remove('procesoEnCurso').catch(() => {});
-        delete procesosActivos[tabId];
-        return;
+        delete procesosActivos[tabId]; return;
       }
 
       if (tipo === 'too_early') {

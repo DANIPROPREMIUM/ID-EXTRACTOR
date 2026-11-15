@@ -1,7 +1,9 @@
 // ============================================================
-// ID EXTRACTOR v15.2 — Popup
-// - Sin chincheta (📌) en la interfaz
-// - Aviso ADBLOCK con cuenta atrás de 10s → reset al menú
+// ID EXTRACTOR v16.2 — Popup
+// - Recupera resultadoPendiente al abrir
+// - Panel OK sin delay (100ms)
+// - body overflow visible (panel se ve completo)
+// - Aviso ADBLOCK con cuenta atrás de 10s
 // - Historial 10, Apple TV legible, copia manual, tema día/noche
 // ============================================================
 
@@ -239,7 +241,6 @@ function mostrarAvisoAdblock() {
     if (seg <= 0) {
       clearInterval(adblockCountdownInterval);
       adblockCountdownInterval = null;
-      // Abortar proceso en el background y volver al menú
       try { chrome.runtime.sendMessage({ action: 'abortarProceso' }); } catch (e) {}
       enProceso = false;
       reset();
@@ -431,6 +432,7 @@ function cancelarAtencion() {
 function reset() {
   cancelarTimeouts();
   cancelarAtencion();
+  try { chrome.storage.local.remove('resultadoPendiente'); } catch (e) {}
   document.getElementById('ok').classList.remove('show');
   document.getElementById('err').classList.remove('show');
   showProgress(false);
@@ -895,7 +897,7 @@ function showOk({ id, servicio }) {
 
   if (!esModoDirecto) setGenie(true);
 
-  const delayOk = esModoDirecto ? 100 : 900;
+  const delayOk = 100;
   setTimeout(() => {
     document.getElementById('ok').classList.add('show');
   }, delayOk);
@@ -1084,25 +1086,49 @@ document.addEventListener('DOMContentLoaded', async () => {
   await cargarAutoExtraer();
   await cargarHistorial();
 
+  // ✅ Comprobar si hay resultado pendiente (el popup se cerró antes de recibirlo)
+  let mostrandoResultadoPendiente = false;
   try {
-    const estado = await chrome.runtime.sendMessage({ action: 'estadoProceso' });
-    if (estado && estado.activo) {
-      enProceso = true;
-      hideInputField(true);
-      showProgress(true);
-      setPct(0);
-      setStage('Proceso en curso…');
+    const { resultadoPendiente } = await chrome.storage.local.get('resultadoPendiente');
+    if (resultadoPendiente && resultadoPendiente.id && (Date.now() - resultadoPendiente.timestamp < 120000)) {
+      enProceso = false;
+      ultimoId = resultadoPendiente.id;
+      const plataforma = resultadoPendiente.servicio || detectarPlataformaDeId(resultadoPendiente.id);
+      ultimaPlataforma = plataforma;
 
-      timeoutProceso = setTimeout(() => {
-        if (enProceso) {
-          enProceso = false;
-          ocultarTodosLosProgresos();
-          hideInputField(false);
-          iniciarPlaceholderRotativo();
-        }
-      }, 180000);
+      document.getElementById('idValue').textContent = resultadoPendiente.id;
+      mostrarBadgePlataforma(plataforma);
+      aplicarColorPlataforma(plataforma);
+      hideInputField(true);
+      document.getElementById('ok').classList.add('show');
+      document.getElementById('err').classList.remove('show');
+      showProgress(false);
+      showProgressDirecta(false);
+      mostrandoResultadoPendiente = true;
     }
   } catch (e) {}
+
+  if (!mostrandoResultadoPendiente) {
+    try {
+      const estado = await chrome.runtime.sendMessage({ action: 'estadoProceso' });
+      if (estado && estado.activo) {
+        enProceso = true;
+        hideInputField(true);
+        showProgress(true);
+        setPct(0);
+        setStage('Proceso en curso…');
+
+        timeoutProceso = setTimeout(() => {
+          if (enProceso) {
+            enProceso = false;
+            ocultarTodosLosProgresos();
+            hideInputField(false);
+            iniciarPlaceholderRotativo();
+          }
+        }, 180000);
+      }
+    } catch (e) {}
+  }
 
   themeToggle.addEventListener('click', (ev) => {
     ev.preventDefault();

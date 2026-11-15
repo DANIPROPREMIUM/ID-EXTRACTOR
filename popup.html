@@ -13,16 +13,8 @@
       width: 360px; padding: 0;
       background: #0a0a0e; color: #ececf1;
       font-family: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif;
-      overflow: hidden; position: relative; min-height: 0; height: auto;
+      overflow: visible; position: relative; min-height: 0; height: auto;
       transition: background 0.3s ease, color 0.3s ease;
-    }
-
-    body.modo-pestana {
-      width: 100% !important;
-      min-width: 360px;
-      max-width: 520px;
-      margin: 0 auto;
-      overflow: visible;
     }
 
     body.tema-claro { background: #f2f2f7; color: #0a0a0e; }
@@ -33,6 +25,7 @@
       width: 400px; height: 300px;
       background: radial-gradient(ellipse, rgba(255, 215, 0, 0.06), transparent 70%);
       pointer-events: none; z-index: 0;
+      transition: background 0.3s ease;
     }
 
     body.tema-claro::before {
@@ -41,6 +34,7 @@
 
     .wrap { position: relative; z-index: 1; padding: 26px 24px 16px; }
 
+    /* ===== HEADER ===== */
     .brand { text-align: center; margin-bottom: 18px; position: relative; }
 
     .brand h1 {
@@ -92,6 +86,7 @@
 
     body.tema-claro .theme-toggle:hover { background: rgba(0, 0, 0, 0.12); }
 
+    /* ===== INPUT ===== */
     .field { margin-bottom: 12px; transition: opacity 0.25s ease; }
     .field.hidden { display: none; }
     .field-top { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
@@ -222,6 +217,7 @@
 
     button.main:active:not(:disabled) { transform: translateY(0) scale(0.99); }
 
+    /* ===== HISTORIAL ===== */
     .historial {
       display: none;
       margin-top: 10px;
@@ -356,6 +352,7 @@
       transform: scale(1.15);
     }
 
+    /* ===== PROGRESO ===== */
     .progress {
       display: none;
       flex-direction: column;
@@ -496,7 +493,7 @@
     .warn-tab.show { display: block; }
     @keyframes warnPulse { 0%, 100% { background: rgba(255, 184, 0, 0.08); border-color: rgba(255, 184, 0, 0.28); } 50% { background: rgba(255, 184, 0, 0.15); border-color: rgba(255, 184, 0, 0.5); } }
 
-    /* ===== AVISO ADBLOCK (sin botón, con cuenta atrás) ===== */
+    /* ===== AVISO ADBLOCK ===== */
     .adblock-tab {
       display: none;
       margin-top: 8px;
@@ -613,7 +610,7 @@
     .err-tg a:hover { color: #ffe680; border-bottom-color: #ffe680; }
 
     .ok { display: none; text-align: center; padding: 10px 0 0; }
-    .ok.show { display: block; animation: fadeIn 0.4s ease 0.8s both; }
+    .ok.show { display: block; animation: fadeIn 0.4s ease both; }
     .ok-title { font-size: 12px; font-weight: 800; color: #00ff88; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 8px; }
 
     .ok-sub {
@@ -844,12 +841,13 @@
         <div class="adblock-tab-title">⚠️ DESACTIVA EL BLOQUEADOR DE ANUNCIOS</div>
         <div class="adblock-tab-text">
           La página de destino requiere ver los anuncios.<br>
-          Desactívalo en tu navegador y <strong>vuelve a extraer la ID</strong>.
+          Desactívalo en tu navegador y <strong>vuelve a poner la URL del acortador en ID Extractor</strong>.
         </div>
         <div class="adblock-countdown">
           Volviendo al inicio en <strong id="adblockCountdown">10</strong>s…
         </div>
       </div>
+    </div>
 
     <div class="progress-directa" id="progressDirecta">
       <div class="directa-spinner"></div>
