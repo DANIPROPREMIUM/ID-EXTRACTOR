@@ -7,7 +7,7 @@
 
 <!-- Imagen Principal (Screenshot o Logo) -->
 <p align="center">
-  <img width="480" height="405" alt="Image" src="https://github.com/user-attachments/assets/0d0a3bae-fe2b-42c9-8120-f96f15e30c7a" />
+  <img width="580" height="405" alt="Image" src="https://github.com/user-attachments/assets/0d0a3bae-fe2b-42c9-8120-f96f15e30c7a" />
 </p>
 
 <p align="center">
