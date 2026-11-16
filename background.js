@@ -1,7 +1,7 @@
 // ============================================================
-// ID EXTRACTOR v16.1 — Background
-// - Detección GENÉRICA de reward dialog (cualquier prefijo)
-// - NO depende de hoftm/wrfpv/prdij/yuqdh/tisyl/nrxua/kavoy
+// ID EXTRACTOR v16.3 — Background
+// - Fix Disney+ ID: corta en caracteres no válidos (</textarea>)
+// - Detección genérica de reward dialog (cualquier prefijo)
 // - Limpia procesoEnCurso al arrancar/instalar
 // - Verifica pestaña existe antes de "ocupado"
 // ============================================================
@@ -397,18 +397,31 @@ function detectarServicioDesdeTexto(texto) {
   return null;
 }
 
+// ============================================================
+// EXTRACCIÓN DE ID — fix caracteres no válidos al final
+// ============================================================
 function extraerId(texto, servicio) {
   if (!texto) return null;
+
   if (servicio === 'disney' || /premium_id:disney/i.test(texto)) {
-    const matchDisney = texto.match(/premium_id:disney:[^\r\n]+/i);
-    if (matchDisney && matchDisney[0]) return matchDisney[0].trim();
+    // ✅ Corta en el primer carácter que NO sea parte de la ID
+    // (letras, números, +, /, =, :, _, -). Así no captura </textarea>, <, >, ", etc.
+    const matchDisney = texto.match(/premium_id:disney:[A-Za-z0-9+/=:_-]+/i);
+    if (matchDisney && matchDisney[0]) {
+      return matchDisney[0].trim();
+    }
   }
+
+  // Regex genérica estricta para IDs tipo premium_id:xxx:xxxx:xxxx:base64
   const regexCualquier = /(premium_id:[a-zA-Z]+:[a-zA-Z0-9]{4,12}:[a-zA-Z0-9]{4,12}:[A-Za-z0-9+/=]{20,})/i;
   const m1 = texto.match(regexCualquier);
   if (m1) return m1[1];
-  const regexSimple = /(premium_id:[^\s<"']+)/i;
+
+  // Regex simple también estricta: solo caracteres de ID válidos
+  const regexSimple = /(premium_id:[A-Za-z0-9+/=:_-]+)/i;
   const m2 = texto.match(regexSimple);
   if (m2) return m2[1];
+
   return null;
 }
 
@@ -508,7 +521,6 @@ async function detectarTipoPagina(tabId) {
           return 'adblock';
         }
 
-        // ✅ Detección genérica: cualquier página con data-*-step o form data-*-form
         if (/(^|\.)xl\.gl$/i.test(host) ||
             /-page(\s|$)/i.test(bodyClass) && document.querySelector('[data-hoftm-step], [data-wrfpv-step], [data-prdij-step], [data-yuqdh-step], [data-tisyl-step], [data-nrxua-step], [data-kavoy-step]') ||
             document.querySelector('.cf-turnstile') ||
@@ -556,9 +568,6 @@ async function esperarNavegacion(tabId, urlAntes, timeout = 15000) {
   return false;
 }
 
-// ============================================================
-// INSPECCIÓN GENÉRICA (cualquier prefijo xl.gl)
-// ============================================================
 async function xlGlInspeccionar(tabId) {
   return ejecutarEnPagina(tabId, () => {
     function esAvanzar(txt) {
@@ -594,14 +603,12 @@ async function xlGlInspeccionar(tabId) {
       return null;
     }
 
-    // ✅ GENÉRICO: cualquier dialog[open] con botón dentro → reward dialog
     function buscarRewardDialogGenerico() {
       const dialogs = document.querySelectorAll('dialog[open]');
       for (const d of dialogs) {
         const btn = d.querySelector('button[type="submit"], button');
         if (btn) return d;
       }
-      // También cualquier elemento con data-*-reward[open]
       const el = document.querySelector('[data-hoftm-reward][open], [data-wrfpv-reward][open], [data-prdij-reward][open], [data-yuqdh-reward][open], [data-tisyl-reward][open], [data-nrxua-reward][open], [data-kavoy-reward][open]');
       if (el) return el;
       return null;
@@ -694,14 +701,12 @@ async function xlGlClickStart(tabId) {
   }, false);
 }
 
-// ✅ GENÉRICO: pulsar botón del dialog open o cualquier [data-*-reward-continue]
 async function xlGlClickRewardDialog(tabId) {
   return ejecutarEnPagina(tabId, () => {
     function esContinuar(txt) {
       const t = (txt || '').trim().toLowerCase();
       return t === 'continue' || t === 'continuar' || t === 'get link' || t === 'getlink' || t === 'obtener enlace' || t === 'ver enlace' || /^continue/i.test(t) || /^get\s*link/i.test(t);
     }
-    // 1) Botones con data-*-reward-continue de cualquier prefijo
     const sels = [
       '[data-hoftm-reward-continue]', '[data-wrfpv-reward-continue]',
       '[data-prdij-reward-continue]', '[data-yuqdh-reward-continue]',
@@ -712,13 +717,11 @@ async function xlGlClickRewardDialog(tabId) {
       const btn = document.querySelector(s);
       if (btn) { btn.disabled = false; btn.removeAttribute('disabled'); btn.click(); return true; }
     }
-    // 2) Botón dentro de cualquier dialog[open]
     const dialogs = document.querySelectorAll('dialog[open]');
     for (const d of dialogs) {
       const btn = d.querySelector('button[type="submit"], button');
       if (btn) { btn.disabled = false; btn.removeAttribute('disabled'); btn.click(); return true; }
     }
-    // 3) Cualquier botón con texto "Continue"/"Get Link" que esté en un dialog
     for (const d of dialogs) {
       for (const b of d.querySelectorAll('button')) {
         if (esContinuar(b.textContent)) { b.disabled = false; b.removeAttribute('disabled'); b.click(); return true; }
@@ -728,7 +731,6 @@ async function xlGlClickRewardDialog(tabId) {
   }, false);
 }
 
-// ✅ GENÉRICO: forzar submit del form con proof del JSON genérico
 async function xlGlForzarForm(tabId) {
   return ejecutarEnPagina(tabId, () => {
     function esAvanzar(txt) {
@@ -740,8 +742,6 @@ async function xlGlForzarForm(tabId) {
       if (/^continue/i.test(t)) return true;
       return false;
     }
-
-    // Buscar cualquier form cuyo button[type=submit] esté fuera de un dialog
     let form = null;
     for (const f of document.querySelectorAll('form')) {
       const btn = f.querySelector('button[type="submit"]');
@@ -753,7 +753,6 @@ async function xlGlForzarForm(tabId) {
     }
     if (!form) return false;
 
-    // Extraer proof del JSON *-step-data de cualquier prefijo
     let proof = '';
     const ids = ['hoftm-step-data', 'wrfpv-step-data', 'prdij-step-data', 'yuqdh-step-data', 'tisyl-step-data', 'nrxua-step-data', 'kavoy-step-data'];
     for (const id of ids) {
@@ -765,7 +764,6 @@ async function xlGlForzarForm(tabId) {
       } catch (e) {}
     }
 
-    // Rellenar inputs con cualquier prefijo
     const prefijos = ['hoftm', 'wrfpv', 'prdij', 'yuqdh', 'tisyl', 'nrxua', 'kavoy'];
     for (const pref of prefijos) {
       const inputRew = form.querySelector(`input[name="${pref}_rewarded"]`);
@@ -787,13 +785,9 @@ async function xlGlForzarForm(tabId) {
   }, false);
 }
 
-// ============================================================
-// MANEJO DEL REWARDED AD DE GOOGLE
-// ============================================================
 async function xlGlManejarAdOverlay(tabId, _prof = 0) {
   await xlLog(tabId, `xlGlManejarAdOverlay inicio (prof=${_prof})`);
 
-  // 1) ¿Dialog de "Thanks for watching" ya visible?
   const tieneDialog = await ejecutarEnPagina(tabId, () => {
     const dialogs = document.querySelectorAll('dialog[open]');
     for (const d of dialogs) if (d.querySelector('button')) return true;
@@ -806,7 +800,6 @@ async function xlGlManejarAdOverlay(tabId, _prof = 0) {
     return 'dialog';
   }
 
-  // 2) ¿Botón close-button real visible?
   const tieneCloseReal = await ejecutarEnPagina(tabId, () => {
     const btn = document.getElementById('close-button');
     if (!btn) return false;
@@ -823,7 +816,6 @@ async function xlGlManejarAdOverlay(tabId, _prof = 0) {
     return 'closed-real';
   }
 
-  // 3) Esperar hasta 20s a close real o dialog
   await xlLog(tabId, 'ad_overlay: esperando hasta 20s a close real o dialog');
   for (let i = 0; i < 20; i++) {
     if (procesoAbortado) return 'abortado';
@@ -858,7 +850,6 @@ async function xlGlManejarAdOverlay(tabId, _prof = 0) {
     }
   }
 
-  // 4) Último recurso: pulsar dismiss-button-element
   await xlLog(tabId, 'ad_overlay: 20s sin close real ni dialog → pulsando dismiss-button-element');
   await ejecutarEnPagina(tabId, () => {
     const btn = document.getElementById('dismiss-button-element');
