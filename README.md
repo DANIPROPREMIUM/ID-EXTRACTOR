@@ -3,11 +3,13 @@
 <!-- ======================================= -->
 
 <!-- Título Principal -->
-<h1 align="center">ID EXTRACTOR v7</h1>
+<h1 align="center">ID EXTRACTOR v7.1</h1>
+
+**V 7.1: Corregido error al copiar la ID de Disney, no se podía acceder con Premium ID ni con la apk Premium ID pro.**
 
 <!-- Imagen Principal (Screenshot o Logo) -->
 <p align="center">
-  <img width="580" height="405" alt="Image" src="https://github.com/user-attachments/assets/0d0a3bae-fe2b-42c9-8120-f96f15e30c7a" />
+  <img width="580" height="405" alt="Image" src="https://github.com/user-attachments/assets/b213c2a8-a60b-4581-981c-e07a8a924aa6" />
 </p>
 
 <p align="center">
@@ -27,7 +29,7 @@
   <img src="https://img.shields.io/badge/PARA%20LEMUR%20BROWSER-ANDROID?style=for-the-badge&logo=android&logoColor=white&color=3DDC84" alt="PARA QUETTA BROWSER EN ANDROID">
   <img src="https://img.shields.io/badge/PARA%20NAVEGADORES%20CHROMIUM-CHROMIUM?style=for-the-badge&logo=google-chrome&logoColor=white&color=4285F4" alt="PARA NAVEGADORES CHROMIUM">
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License">
-  <img src="https://img.shields.io/badge/version-7-blue.svg?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-7.1-blue.svg?style=for-the-badge" alt="Version">
 </p>  
 
 ---
