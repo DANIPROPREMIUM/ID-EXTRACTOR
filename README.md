@@ -18,7 +18,7 @@
 
 <!-- Insignia para Android -->
 <p align="center">
-  <img src="https://badgen.net/badge/PARA%20LEMUR%20BROWSER/ANDROID?icon=android&color=3DDC84&scale=2" alt="PARA ANDROID">
+  <img src="https://badgen.net/badge/PARA%20QUETTA%20BROWSER/ANDROID?icon=android&color=3DDC84&scale=2" alt="PARA ANDROID">
 </p>
 
 <br>
@@ -26,7 +26,7 @@
 
 <!-- Badges de Información del Proyecto -->
 <p align="center">
-  <img src="https://img.shields.io/badge/PARA%20LEMUR%20BROWSER-ANDROID?style=for-the-badge&logo=android&logoColor=white&color=3DDC84" alt="PARA QUETTA BROWSER EN ANDROID">
+  <img src="https://img.shields.io/badge/PARA%20QUETTA%20BROWSER-ANDROID?style=for-the-badge&logo=android&logoColor=white&color=3DDC84" alt="PARA QUETTA BROWSER EN ANDROID">
   <img src="https://img.shields.io/badge/PARA%20NAVEGADORES%20CHROMIUM-CHROMIUM?style=for-the-badge&logo=google-chrome&logoColor=white&color=4285F4" alt="PARA NAVEGADORES CHROMIUM">
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License">
   <img src="https://img.shields.io/badge/version-7.1-blue.svg?style=for-the-badge" alt="Version">
@@ -65,16 +65,14 @@ Cambia entre **tema oscuro y claro** con el botón 🌙 / ☀️ de la esquina s
 ---
 ## 🚀 Instalación Android
 
-1. **Abre Lemur browser y descarga el archivo ZIP** de este repositorio:
+1. **Abre Quetta browser y descarga el archivo ZIP** de este repositorio:
 2. **Click aquí**: <p align="center">
   <a href="https://github.com/DANIPROPREMIUM/ID-EXTRACTOR/archive/refs/heads/main.zip">
     <img src="https://img.shields.io/badge/Descargar-Extensión-ANDROID?style=for-the-badge&logo=android&logoColor=white&color=3DDC84" alt="Descargar para Android">
   </a>
 
-3. **Dirígete a la pieza de puzzle/ gestionar Extensiones/ load unpacked/ cargar descomprimida**
-4. **Selecciona descargar**
-5. **Haz clic en el archivo: ID EXTRACTOR**
-6. ¡Listo! La extensión está instalada y lista para usar
+3. **Dirígete a los 3 puntitos/ pieza de puzzle/ gestionar Extensiones/ opciones de desarrollador.../ (from .zip/ .crx/ .user.js) / descargar / elige el archivo ID Extractor**
+4. ¡Listo! La extensión está instalada y lista para usar.
    
 
 
